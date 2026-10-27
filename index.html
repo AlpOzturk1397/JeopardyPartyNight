@@ -58,7 +58,7 @@ body.play .stage{min-height:calc(100vh - 240px)}
 <body>
 <div id="app"></div>
 <footer class="note">Board concept inspired by <a href="https://jeopardy.brianyu.me/" target="_blank" rel="noopener">Brian Yu’s Jeopardy game player</a>. Not affiliated with Jeopardy! or Sony.</footer>
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'"></script>
 <script>
 /* ---- Peer-to-peer room (replaces the claude.ai room) ---- */
 const PJ='jeopardy-night-';
@@ -68,6 +68,7 @@ function hostRoom(onReady,previousCode=''){
   const fin=v=>{if(!done){done=true;clearTimeout(timer);onReady(v)}};
   r.emit=(t,d)=>conns.forEach(c=>{try{c.open&&c.send({t,d})}catch(e){console.error('Could not send room message',e)}});
   r.close=()=>{conns.forEach(c=>c.close());conns.clear();if(peer&&!peer.destroyed)peer.destroy()};
+  r.redirect=code=>{r.redirectCode=code;r.emit('new-room',{code})};
   const start=()=>{
     const A='ABCDEFGHJKMNPQRSTUVWXYZ23456789';let code='';
     do{code='';for(let i=0;i<6;i++)code+=A[Math.floor(Math.random()*A.length)]}while(code===previousCode);
@@ -79,7 +80,7 @@ function hostRoom(onReady,previousCode=''){
       if(e.type==='unavailable-id'&&tries++<5){attempt.destroy();start()}
       else{attempt.destroy();fin(null)}
     });
-    attempt.on('connection',c=>{conns.add(c);c.on('data',m=>m&&r._d(m.t,m.d));c.on('close',()=>conns.delete(c));c.on('error',()=>conns.delete(c))})
+    attempt.on('connection',c=>{conns.add(c);c.on('open',()=>{if(r.redirectCode)c.send({t:'new-room',d:{code:r.redirectCode}})});c.on('data',m=>m&&r._d(m.t,m.d));c.on('close',()=>conns.delete(c));c.on('error',()=>conns.delete(c))})
   };
   timer=setTimeout(()=>{if(peer&&!peer.destroyed)peer.destroy();fin(null)},10000);
   start();
@@ -91,6 +92,10 @@ function playerRoom(code,onReady){
   r.status='connecting';r.connected=false;
   const status=s=>{r.status=s;r.connected=s==='connected';r._d('_status',s)};
   const schedule=ms=>{clearTimeout(retryTimer);retryTimer=setTimeout(connect,ms)};
+  const discardConnection=()=>{
+    const c=conn;conn=null;
+    if(c)try{c.close()}catch(e){console.error('Could not close room connection',e)}
+  };
   const connect=()=>{
     if(!peer||peer.destroyed||conn)return;
     status('connecting');
@@ -114,7 +119,7 @@ function playerRoom(code,onReady){
     attempt.on('open',()=>{if(peer!==attempt)return;ready();connect()});
     attempt.on('error',e=>{
       if(peer!==attempt)return;
-      if(e.type==='peer-unavailable'){status('unavailable');schedule(3000)}
+      if(e.type==='peer-unavailable'){discardConnection();status('unavailable');schedule(3000)}
       else{status('error');schedule(5000)}
       ready();
     });
@@ -268,9 +273,9 @@ else{
     const nb=`<header><h1>GhostHaus Christmas Jeopardy</h1>${started?`<button id="fs">⛶ Fullscreen</button><span class="note">Round ${pr}</span>`:`<button id="tE" class="${tab==='edit'?'on':''}">✏️ Edit questions</button><button id="tP">▶ Start game</button>`}
       <span class="note">${room?'● room <b>'+room.code+'</b> · '+pid().length+' player(s)':'○ not connected'}</span></header>`;
     if(tab==='edit'){const f=document.activeElement;if(f&&f.dataset&&f.dataset.f&&document.body.contains(f)&&f.id!=='x'&&app.dataset.t==='edit'){return}
-      app.dataset.t='edit';app.innerHTML=nb+`<main>${room?`<div class="note">Players can already join: open <b>${esc(joinUrl(room.code))}</b> on their phones (room ${room.code}).</div>`:''}${editor()}</main>`;return}
+      app.dataset.t='edit';app.innerHTML=nb+`<main>${room?`<div class="card"><div class="row"><b>Join from another device:</b><span>Room code <b>${room.code}</b></span><button id="copyjoin">Copy join link</button></div><div class="row" style="margin-top:8px"><label for="joincode">Or enter a room code:</label><input id="joincode" maxlength="12" autocomplete="off" autocapitalize="characters" placeholder="6-character code" style="width:180px"><button class="pri" id="joinbycode">Join on this device</button></div></div>`:''}${editor()}</main>`;return}
     app.dataset.t='play';
-    if(!$('#stg')){app.innerHTML=nb+`<main>${room?`<div class="note">Players: open <b>${esc(joinUrl(room.code))}</b> on their phones.${location.protocol==='file:'?' <b>This file is opened locally, so phones can’t load it. Host it on a website first (see README).</b>':''}</div>`:'<div class="warn">Couldn’t reach the connection service (peerjs.com). Check your internet; phone buzzers need it.</div>'}<div id="stg"></div><div class="ctl" id="ctl"></div><div class="score" id="sc"></div></main>`;stageKey=''}
+    if(!$('#stg')){app.innerHTML=nb+`<main>${room?`<div class="row note"><span>Players: open <b>${esc(joinUrl(room.code))}</b> on their phones.${location.protocol==='file:'?' <b>This file is opened locally, so phones can’t load it. Host it on a website first (see README).</b>':''}</span><button id="copyjoin">Copy join link</button></div>`:'<div class="warn">Couldn’t reach the connection service (peerjs.com). Check your internet; phone buzzers need it.</div>'}<div id="stg"></div><div class="ctl" id="ctl"></div><div class="score" id="sc"></div></main>`;stageKey=''}
     const key=phase+'|'+(cur?cur.c+'-'+cur.i:'')+'|'+used.size+'|'+pr;
     if(key!==stageKey){stageKey=key;$('#stg').innerHTML=stage();mountMedia()}
     $('#ctl').innerHTML=ctl();$('#sc').innerHTML=scoreboard();
@@ -309,7 +314,7 @@ else{
     const nextRoom=await new Promise(res=>hostRoom(res,previousRoom&&previousRoom.code));
     if(!nextRoom){button.disabled=false;alert('Could not create a new game room. Check your internet connection and try again.');return}
     bindRoom(nextRoom);
-    if(previousRoom){previousRoom.emit('new-room',{code:nextRoom.code});setTimeout(()=>previousRoom.close(),1000)}
+    if(previousRoom)previousRoom.redirect(nextRoom.code);
     started=true;tab='play';pr=1;used=new Set();
     document.body.classList.add('play');try{document.documentElement.requestFullscreen().catch(()=>{})}catch(e){}
     renderFull();broadcast();
@@ -318,6 +323,8 @@ else{
   app.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b)return;const id=b.id;
     if(id==='tE'&&!started){tab='edit';app.dataset.t='';render()} else if(id==='tP'||id==='toplay')startGame(b);
+    else if(id==='copyjoin'){const url=joinUrl(room.code);if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(()=>{b.textContent='Copied!'}).catch(e=>{console.error('Could not copy join link',e);prompt('Copy this join link:',url)});else prompt('Copy this join link:',url)}
+    else if(id==='joinbycode'){const code=$('#joincode').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');if(code.length!==6){alert('Enter the 6-character room code.');return}location.href=joinUrl(code)}
     else if(id==='fs'){try{document.documentElement.requestFullscreen().catch(()=>{})}catch(e){}}
     else if(id==='r1'||id==='r2'){er=id==='r1'?1:2;app.dataset.t='';render()}
     else if(id==='nr'){pr=2;used=new Set();phase='board';cur=null;ans=false;const ids=pid();if(ids.length)control=ids.sort((a,b)=>P[a].score-P[b].score)[0];push()}
