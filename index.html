@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jeopardy Night</title>
+<style>
+:root{--bg:#f3f4f9;--fg:#14172b;--card:#fff;--line:#d3d8e8;--mute:#5d6485;--blue:#0a1a8c;--gold:#ffcc33;--ok:#1f9d55;--bad:#d64545;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d0f1c;--fg:#eef0fa;--card:#181c33;--line:#2b3157;--mute:#9aa2cc}}
+:root[data-theme="dark"]{--bg:#0d0f1c;--fg:#eef0fa;--card:#181c33;--line:#2b3157;--mute:#9aa2cc}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line)}
+h1{font:700 20px Georgia,serif;margin:0;color:var(--gold);background:var(--blue);padding:4px 12px;border-radius:6px;letter-spacing:.5px}
+button,select,input,textarea{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+button{cursor:pointer;font-weight:600}button:disabled{opacity:.45;cursor:default}
+button.pri{background:var(--blue);color:#fff;border-color:var(--blue)}
+button.ok{background:var(--ok);color:#fff;border-color:var(--ok)}button.bad{background:var(--bad);color:#fff;border-color:var(--bad)}
+button.on{background:var(--gold);color:#111;border-color:var(--gold)}
+main{padding:16px;max-width:1300px;margin:0 auto}
+.note{color:var(--mute);font-size:14px}
+.warn{background:#fff3cd;color:#5a4400;padding:8px 12px;border-radius:8px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.card input,.card textarea,.card select{width:100%;margin:3px 0}
+.cl{border-top:1px solid var(--line);padding:8px 0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.board{display:grid;gap:6px;overflow-x:auto}
+.bc{background:var(--blue);color:var(--gold);font:700 clamp(18px,3.4vw,42px) Georgia,serif;text-align:center;padding:clamp(10px,2.2vw,28px) 4px;border-radius:4px;border:0;min-height:56px}
+.bc.h{font-size:clamp(11px,1.6vw,20px);text-transform:uppercase;color:#fff;display:flex;align-items:center;justify-content:center;min-height:70px}
+.bc.used{visibility:hidden}
+.stage{background:var(--blue);color:#fff;border-radius:12px;padding:28px;text-align:center;min-height:260px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+.stage .t{font:700 clamp(22px,4vw,46px) Georgia,serif;text-transform:uppercase;max-width:900px}
+.stage .m{color:var(--gold);font-weight:700;letter-spacing:1px}
+.stage video{max-width:100%;max-height:50vh;border-radius:8px}
+.ctl{margin:14px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.score{display:flex;gap:10px;flex-wrap:wrap}
+.pl{background:var(--card);border:2px solid var(--line);border-radius:10px;padding:8px 14px;min-width:120px;text-align:center}
+.pl.hot{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold)}.pl.ctrl{border-color:var(--ok)}
+.pl b{display:block;font-size:22px}
+.phone{min-height:100vh;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;padding:20px;text-align:center}
+.buzz{width:min(78vw,340px);height:min(78vw,340px);border-radius:50%;border:0;font-size:36px;font-weight:800;color:#fff;background:#c9362f;box-shadow:0 10px 0 #7d1d19;touch-action:manipulation}
+.buzz:active{transform:translateY(8px);box-shadow:0 2px 0 #7d1d19}
+.buzz.g{background:#8a90ad;box-shadow:0 10px 0 #5a5f78}
+.big{font-size:28px;font-weight:700}
+footer{padding:16px;text-align:center}
+body.play main{max-width:none;padding:10px 14px}
+body.play header{padding:6px 14px}
+body.play footer{display:none}
+body.play .board{min-height:calc(100vh - 215px);grid-template-rows:auto repeat(5,1fr)}
+body.play .bc{font-size:clamp(24px,5vw,72px)}
+body.play .bc.h{font-size:clamp(13px,1.9vw,28px)}
+body.play .stage{min-height:calc(100vh - 240px)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<footer class="note">Board concept inspired by <a href="https://jeopardy.brianyu.me/" target="_blank" rel="noopener">Brian Yu’s Jeopardy game player</a>. Not affiliated with Jeopardy! or Sony.</footer>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+/* ---- Peer-to-peer room (replaces the claude.ai room) ---- */
+const PJ='jeopardy-night-';
+function makeRoom(){const h={};return{on:(t,f)=>{(h[t]=h[t]||[]).push(f)},_d:(t,d)=>{(h[t]||[]).forEach(f=>{try{f({data:d})}catch(e){console.error(e)}})}}}
+function hostRoom(onReady){
+  const r=makeRoom(),conns=new Set();let tries=0,done=false;
+  const fin=v=>{if(!done){done=true;onReady(v)}};
+  r.emit=(t,d)=>conns.forEach(c=>{try{c.open&&c.send({t,d})}catch(e){}});
+  const start=()=>{const A='ABCDEFGHJKMNPQRSTUVWXYZ';let code='';for(let i=0;i<4;i++)code+=A[Math.floor(Math.random()*A.length)];
+    let peer;try{peer=new Peer(PJ+code)}catch(e){fin(null);return}
+    peer.on('open',()=>{r.code=code;fin(r)});
+    peer.on('error',e=>{if(e.type==='unavailable-id'&&tries++<5)start();else fin(null)});
+    peer.on('connection',c=>{conns.add(c);c.on('data',m=>m&&r._d(m.t,m.d));c.on('close',()=>conns.delete(c));c.on('error',()=>conns.delete(c))})};
+  start();setTimeout(()=>fin(null),10000);
+}
+function playerRoom(code,onReady){
+  const r=makeRoom();let conn=null;
+  r.emit=(t,d)=>{try{conn&&conn.open&&conn.send({t,d})}catch(e){}};
+  let peer;try{peer=new Peer()}catch(e){onReady(null);return}
+  const connect=()=>{conn=peer.connect(PJ+code,{reliable:true});
+    conn.on('open',()=>r._d('_open',1));conn.on('data',m=>m&&r._d(m.t,m.d));
+    conn.on('close',()=>setTimeout(connect,2000));conn.on('error',()=>{})};
+  peer.on('open',()=>{connect();onReady(r)});
+  peer.on('error',e=>{if(e.type==='peer-unavailable')setTimeout(connect,3000);else if(e.type==='network'||e.type==='server-error')onReady(null)});
+}
+const joinUrl=code=>location.href.split(/[?#]/)[0]+'?join='+code;
+</script>
+<script>
+const $=s=>document.querySelector(s), app=$('#app');
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+let room=null, assets=null;
+const joinCode=new URLSearchParams(location.search).get('join');
+const isPlayer=!!joinCode;
+const emit=(t,d)=>{try{room&&room.emit(t,d)}catch(e){}};
+
+/* ================= PHONE BUZZER ================= */
+if(isPlayer){
+  let S=null, me={id:ls.get('jp_id')||('p'+Math.random().toString(36).slice(2,9)), name:ls.get('jp_name')||''};
+  ls.set('jp_id',me.id);
+  const join=()=>{if(me.name)emit('join',{id:me.id,name:me.name})};
+  const draw=()=>{
+    if(!me.name){app.innerHTML=`<div class="phone"><h1>Jeopardy Night</h1><input id="nm" placeholder="Your name" maxlength="16" style="font-size:22px;text-align:center"><button class="pri" id="go" style="font-size:22px">Join game</button></div>`;
+      $('#go').onclick=()=>{const v=$('#nm').value.trim();if(!v)return;me.name=v;ls.set('jp_name',v);join();draw()};return}
+    if(!room){app.innerHTML=`<div class="phone"><div class="big">Connecting…</div><p class="note">If this takes more than a few seconds, check your internet and the room code.</p></div>`;return}
+    if(!S){app.innerHTML=`<div class="phone"><div class="big">Hi ${esc(me.name)}!</div><p class="note">Waiting for the host…</p></div>`;return}
+    const p=S.players[me.id]; const sc=p?p.s:0; let h=`<div class="phone"><div class="note">${esc(me.name)}</div><div class="big">$${sc}</div>`;
+    const wagerBox=(max,topic,label)=>`<div>${label}</div><input id="wg" type="number" inputmode="numeric" min="0" max="${max}" placeholder="0–${max}" style="font-size:26px;text-align:center;width:180px"><button class="pri" id="wb">Lock in wager</button>`;
+    if(S.phase==='clue'){
+      const mine=S.buzzer===me.id, locked=S.locked.includes(me.id);
+      h+=`<button class="buzz ${S.open&&!locked?'':'g'}" id="bz" ${S.open&&!locked?'':'disabled'}>${mine?'YOU’RE IN!':locked?'LOCKED':S.open?'BUZZ':'WAIT'}</button>`;
+      if(S.buzzer&&!mine)h+=`<div class="note">${esc(S.players[S.buzzer]?.n||'Someone')} buzzed first</div>`;
+    }else if(S.phase==='ddwager'){
+      h+=S.control===me.id?`<div class="big">DAILY DOUBLE!</div>`+wagerBox(S.maxW,'wager','Wager (min $5)'):`<div class="note">${esc(S.players[S.control]?.n||'A player')} is wagering on a Daily Double…</div>`;
+    }else if(S.phase==='fwager'){
+      h+=sc>0?`<div class="big">Final: ${esc(S.fcat)}</div>`+wagerBox(sc,'wager','Wager up to $'+sc):`<div class="note">Final Jeopardy: you need a positive score to play.</div>`;
+      if(S.wagered.includes(me.id))h+=`<div class="note">Wager locked ✓</div>`;
+    }else if(S.phase==='fans'){
+      h+=sc>0?`<div class="big">Your answer</div><textarea id="fa" rows="3" style="width:90%;font-size:20px"></textarea><button class="pri" id="fb">Submit</button>${S.answered.includes(me.id)?'<div class="note">Submitted ✓ (you can resubmit)</div>':''}`:`<div class="note">Watch the screen!</div>`;
+    }else h+=`<div class="note">${S.phase==='board'?'Pick is on the big screen':'Look at the big screen'}${S.control===me.id&&S.phase==='board'?' — <b>you have control!</b>':''}</div>`;
+    app.innerHTML=h+'</div>';
+    const bz=$('#bz');if(bz)bz.onpointerdown=()=>{emit('buzz',{id:me.id});try{navigator.vibrate&&navigator.vibrate(40)}catch(e){}};
+    const wb=$('#wb');if(wb)wb.onclick=()=>{const v=parseInt($('#wg').value,10);if(isNaN(v))return;emit('wager',{id:me.id,amount:v});wb.textContent='Sent ✓'};
+    const fb=$('#fb');if(fb)fb.onclick=()=>{emit('fans',{id:me.id,text:$('#fa').value.slice(0,200)});fb.textContent='Sent ✓'};
+  };
+  draw();
+  (async()=>{room=await new Promise(res=>playerRoom(joinCode.toUpperCase(),res));if(!room){draw();return}
+    room.on('_open',join);room.on('state',m=>{S=m.data;if(!S.players[me.id])join();
+      const a=document.activeElement; if(a&&(a.id==='wg'||a.id==='fa'))return; draw()});
+    join();draw();setInterval(()=>{if(!S)join()},2500);
+  })();
+}
+
+/* ================= HOST ================= */
+else{
+  const blank=()=>({type:'text',text:'',ans:'',dd:false,media:'',mname:''});
+  const mkR=()=>({cats:Array.from({length:5},(_,i)=>({name:'Category '+(i+1),clues:Array.from({length:5},blank)}))});
+  const norm=g=>{if(!g)return null;if(g.cats&&!g.r1)g={r1:{cats:g.cats},final:g.final};if(!g.r1||!Array.isArray(g.r1.cats))return null;if(!g.r2||!Array.isArray(g.r2.cats))g.r2=mkR();g.final=g.final||{cat:'',clue:'',ans:''};return g};
+  let G; try{G=norm(JSON.parse(ls.get('jp_game')))}catch(e){}
+  if(!G)G={r1:mkR(),r2:mkR(),final:{cat:'',clue:'',ans:''}};
+  ['r1','r2'].forEach(r=>G[r].cats.forEach(c=>c.clues.forEach(q=>{if(String(q.media||'').startsWith('blob:'))q.media=''})));
+  const save=()=>ls.set('jp_game',JSON.stringify(G));
+  const CATS=()=>G['r'+(tab==='edit'?er:pr)].cats, MULT=()=>(tab==='edit'?er:pr)===2?2:1;
+  let tab='edit', er=1, pr=1, started=false, P={}, used=new Set(), cur=null, phase='board', open=false, buzzer=null, locked=[], control=null, ddW=0, maxW=0, stageKey='', ans=false, done={}, mediaEl=null;
+  const k=()=>CATS()[cur.c].clues[cur.i], val=()=>(cur.i+1)*200*MULT(), pid=()=>Object.keys(P);
+  const elig=()=>pid().filter(i=>P[i].score>0);
+
+  function broadcast(){
+    const pl={};pid().forEach(i=>pl[i]={n:P[i].name,s:P[i].score});
+    emit('state',{phase,open,buzzer,locked,control,maxW,fcat:G.final.cat,players:pl,
+      wagered:pid().filter(i=>P[i].wager!=null),answered:pid().filter(i=>P[i].fans!=null)});
+  }
+  function push(){render();broadcast()}
+
+  /* ----- editor ----- */
+  function editor(){
+    const t=CATS().map((c,ci)=>`<div class="card"><input data-c="${ci}" data-f="name" value="${esc(c.name)}" placeholder="Category name" style="font-weight:700">`+
+      c.clues.map((q,i)=>`<div class="cl"><div class="row"><b>$${(i+1)*200*MULT()}</b>
+        <select data-c="${ci}" data-i="${i}" data-f="type" style="width:auto"><option value="text"${q.type==='text'?' selected':''}>Text</option><option value="audio"${q.type==='audio'?' selected':''}>🔊 Audio</option><option value="video"${q.type==='video'?' selected':''}>🎬 Video</option></select>
+        <label class="note"><input type="checkbox" style="width:auto" data-c="${ci}" data-i="${i}" data-f="dd"${q.dd?' checked':''}> Daily Double</label></div>
+        <textarea rows="2" data-c="${ci}" data-i="${i}" data-f="text" placeholder="Clue text${q.type!=='text'?' (optional with media)':''}">${esc(q.text)}</textarea>
+        <input data-c="${ci}" data-i="${i}" data-f="ans" value="${esc(q.ans)}" placeholder="Answer (What is…?)">
+        ${q.type!=='text'?(assets?`<input type="file" data-c="${ci}" data-i="${i}" data-f="file" accept="${q.type}/*"><div class="note">${q.media?'✓ '+esc(q.mname):q.mname?'⚠ Re-select “'+esc(q.mname)+'” (media files must be re-added each session)':'No file yet'}</div>`:'<div class="note">File upload needs editor access.</div>'):''}
+      </div>`).join('')+`</div>`).join('');
+    return `<div class="ctl"><button id="addc">+ Category</button><button id="rmc">− Category</button>
+      <button id="r1" class="${er===1?'on':''}">Round 1 ($200–$1000)</button><button id="r2" class="${er===2?'on':''}">Round 2 ($400–$2000)</button>
+      <button id="exp">⬇ Export questions</button><label class="note">⬆ Import: <input type="file" id="imp" accept=".json" style="width:auto"></label><button class="pri" id="toplay">▶ Start game (locks editing)</button></div>
+      <p class="note">Leave a clue blank to skip that square. Changes save automatically in this browser. Audio/video files are uploaded and play on the host screen only.</p>
+      <div class="grid">${t}<div class="card"><b>Final Jeopardy</b><input data-f="fcat" value="${esc(G.final.cat)}" placeholder="Category"><textarea rows="3" data-f="fclue" placeholder="Clue">${esc(G.final.clue)}</textarea><input data-f="fans" value="${esc(G.final.ans)}" placeholder="Answer"></div></div>`;
+  }
+
+  /* ----- play ----- */
+  function stage(){
+    mediaEl=null;
+    if(phase==='board'){const n=CATS().length;
+      return `<div class="note" style="text-align:center"><b>ROUND ${pr}</b>${pr===2?' · values doubled':''}</div><div class="board" style="grid-template-columns:repeat(${n},minmax(90px,1fr))">`+CATS().map(c=>`<div class="bc h">${esc(c.name)}</div>`).join('')+
+        [0,1,2,3,4].map(i=>CATS().map((c,ci)=>{const q=c.clues[i],ok=q&&(q.text||q.media)&&!used.has(ci+'-'+i);return `<button class="bc${ok?'':' used'}" data-c="${ci}" data-i="${i}" ${ok?'':'disabled'}>$${(i+1)*200*MULT()}</button>`}).join('')).join('')+`</div>`}
+    if(phase==='ddwager')return `<div class="stage"><div class="t">Daily Double!</div><div class="m">${esc(CATS()[cur.c].name)}</div></div>`;
+    if(phase==='fwager')return `<div class="stage"><div class="m">FINAL JEOPARDY</div><div class="t">${esc(G.final.cat||'—')}</div></div>`;
+    if(phase==='fans'||phase==='freveal')return `<div class="stage"><div class="m">FINAL JEOPARDY · ${esc(G.final.cat)}</div><div class="t">${esc(G.final.clue)}</div></div>`;
+    if(phase==='over')return `<div class="stage"><div class="t">Game over</div></div>`;
+    const q=k();
+    return `<div class="stage"><div class="m">${esc(CATS()[cur.c].name)} · $${val()}${q.dd?' · DAILY DOUBLE':''}</div>${q.text?`<div class="t">${esc(q.text)}</div>`:''}<div id="mslot"></div></div>`;
+  }
+  function mountMedia(){
+    const s=$('#mslot');if(!s||!cur)return;const q=k();if(q.type==='text'||!q.media)return;
+    mediaEl=document.createElement(q.type==='audio'?'audio':'video');mediaEl.controls=true;mediaEl.src=q.media;mediaEl.autoplay=false;s.appendChild(mediaEl);
+  }
+  const who=i=>esc(P[i]?.name||'?');
+  function ctl(){
+    const q=cur&&phase!=='board'&&phase!=='fwager'&&phase!=='fans'&&phase!=='freveal'&&phase!=='over'?k():null;
+    let h='';
+    if(phase==='board')h=`<label>Control: <select id="ctrl"><option value="">—</option>${pid().map(i=>`<option value="${i}"${control===i?' selected':''}>${who(i)}</option>`).join('')}</select></label>${pr===2?'<button class="pri" id="fin">Final Jeopardy →</button>':'<button class="pri" id="nr">Start Round 2 →</button>'}`;
+    else if(phase==='clue'){
+      h=ans?`<div><b>Answer:</b> ${esc(q.ans||'—')}</div><button class="pri" id="back">Back to board</button>`:
+        buzzer?`<b>${who(buzzer)} buzzed in!</b><button class="ok" id="right">✓ Correct +$${val()}</button><button class="bad" id="wrong">✗ Wrong −$${val()}</button>`:
+        open?`<b>Buzzers OPEN</b><button id="close">Close buzzers</button>`:`<button class="pri" id="openb">Open buzzers</button>`;
+      if(!ans)h+=`<button id="reveal">Reveal answer (no score)</button>`;
+    }else if(phase==='ddwager')h=`<b>Waiting for ${who(control)} to wager (max $${maxW})…</b><input id="mw" type="number" placeholder="override" style="width:120px"><button id="setw">Set wager</button>`;
+    else if(phase==='dd')h=ans?`<div><b>Answer:</b> ${esc(q.ans||'—')}</div><button class="pri" id="back">Back to board</button>`:`<b>${who(control)} wagered $${ddW}</b><button class="ok" id="right">✓ Correct</button><button class="bad" id="wrong">✗ Wrong</button>`;
+    else if(phase==='fwager')h=`<b>Wagers in: ${elig().filter(i=>P[i].wager!=null).length}/${elig().length}</b><button class="pri" id="fshow">Show clue</button>`;
+    else if(phase==='fans')h=`<b>Answers in: ${elig().filter(i=>P[i].fans!=null).length}/${elig().length}</b><button class="pri" id="frev">Reveal answers</button>`;
+    else if(phase==='freveal')h=`<div style="width:100%"><div><b>Correct answer:</b> ${esc(G.final.ans||'—')}</div>`+elig0().map(i=>`<div class="row card" style="margin:6px 0"><b>${who(i)}</b> “${esc(P[i].fans||'(no answer)')}” · wager $${P[i].wager||0}
+      <button class="ok" data-j="${i}" data-r="1" ${done[i]?'disabled':''}>✓</button><button class="bad" data-j="${i}" data-r="0" ${done[i]?'disabled':''}>✗</button></div>`).join('')+`<button class="pri" id="fend">Finish game</button></div>`;
+    else h=`<b>Winner: ${pid().sort((a,b)=>P[b].score-P[a].score).slice(0,1).map(who).join('')||'—'}</b>`;
+    return h;
+  }
+  const elig0=()=>pid().filter(i=>P[i].wager!=null);
+  function scoreboard(){return pid().length?pid().map(i=>`<div class="pl${buzzer===i?' hot':''}${control===i?' ctrl':''}"><div class="note">${who(i)}</div><b>$${P[i].score}</b></div>`).join(''):`<div class="note">No players yet. Have players open the join link shown above on their phones.</div>`}
+
+  function render(){
+    const nb=`<header><h1>JEOPARDY NIGHT</h1>${started?`<button id="fs">⛶ Fullscreen</button><span class="note">Round ${pr}</span>`:`<button id="tE" class="${tab==='edit'?'on':''}">✏️ Edit questions</button><button id="tP">▶ Start game</button>`}
+      <span class="note">${room?'● room <b>'+room.code+'</b> · '+pid().length+' player(s)':'○ not connected'}</span></header>`;
+    if(tab==='edit'){const f=document.activeElement;if(f&&f.dataset&&f.dataset.f&&document.body.contains(f)&&f.id!=='x'&&app.dataset.t==='edit'){return}
+      app.dataset.t='edit';app.innerHTML=nb+`<main>${room?`<div class="note">Players can already join: open <b>${esc(joinUrl(room.code))}</b> on their phones (room ${room.code}).</div>`:''}${editor()}</main>`;return}
+    app.dataset.t='play';
+    if(!$('#stg')){app.innerHTML=nb+`<main>${room?`<div class="note">Players: open <b>${esc(joinUrl(room.code))}</b> on their phones.${location.protocol==='file:'?' <b>This file is opened locally, so phones can’t load it. Host it on a website first (see README).</b>':''}</div>`:'<div class="warn">Couldn’t reach the connection service (peerjs.com). Check your internet; phone buzzers need it.</div>'}<div id="stg"></div><div class="ctl" id="ctl"></div><div class="score" id="sc"></div></main>`;stageKey=''}
+    const key=phase+'|'+(cur?cur.c+'-'+cur.i:'')+'|'+used.size+'|'+pr;
+    if(key!==stageKey){stageKey=key;$('#stg').innerHTML=stage();mountMedia()}
+    $('#ctl').innerHTML=ctl();$('#sc').innerHTML=scoreboard();
+  }
+  function renderFull(){app.dataset.t='';render()}
+
+  /* ----- host actions ----- */
+  function reveal(){ans=true;open=false}
+  function startClue(c,i){cur={c,i};used.add(c+'-'+i);ans=false;open=false;buzzer=null;locked=[];
+    if(k().dd){if(!control||!P[control])control=pid()[0]||null;phase='ddwager';maxW=control?Math.max(P[control].score,1000*MULT()):0;P[control]&&(ddW=0)}else phase='clue';
+    push()}
+  function applyWager(id,a){
+    if(phase==='ddwager'&&id===control){ddW=Math.max(5,Math.min(maxW,a|0));phase='dd';push()}
+    else if(phase==='fwager'&&P[id]&&P[id].score>0){P[id].wager=Math.max(0,Math.min(P[id].score,a|0));push()}
+  }
+  function onMsg(t,d,fn){room.on(t,m=>{if(m.data&&typeof m.data==='object')fn(m.data)})}
+  async function init(){
+    assets={upload:f=>Promise.resolve({url:URL.createObjectURL(f)})};
+    room=await new Promise(res=>hostRoom(res));
+    if(room){
+      onMsg('join',d=>{const n=String(d.name||'').slice(0,16);if(!d.id||!n)return;
+        if(!P[d.id])P[d.id]={name:n,score:0,wager:null,fans:null};else P[d.id].name=n;
+        if(!control)control=d.id;push()});
+      onMsg('buzz',d=>{if(phase==='clue'&&open&&!buzzer&&P[d.id]&&!locked.includes(d.id)){buzzer=d.id;open=false;push()}});
+      onMsg('wager',d=>applyWager(d.id,parseInt(d.amount,10)||0));
+      onMsg('fans',d=>{if(phase==='fans'&&P[d.id]){P[d.id].fans=String(d.text||'').slice(0,200);push()}});
+      setInterval(broadcast,3000);
+    }
+    renderFull();
+  }
+
+  app.addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b)return;const id=b.id;
+    if(id==='tE'&&!started){tab='edit';app.dataset.t='';render()} else if(id==='tP'||id==='toplay'){if(started)return;started=true;tab='play';pr=1;used=new Set();document.body.classList.add('play');try{document.documentElement.requestFullscreen().catch(()=>{})}catch(e){}renderFull();broadcast()}
+    else if(id==='fs'){try{document.documentElement.requestFullscreen().catch(()=>{})}catch(e){}}
+    else if(id==='r1'||id==='r2'){er=id==='r1'?1:2;app.dataset.t='';render()}
+    else if(id==='nr'){pr=2;used=new Set();phase='board';cur=null;ans=false;const ids=pid();if(ids.length)control=ids.sort((a,b)=>P[a].score-P[b].score)[0];push()}
+    else if(id==='addc'){CATS().push({name:'Category '+(CATS().length+1),clues:Array.from({length:5},blank)});save();app.dataset.t='';render()}
+    else if(id==='rmc'&&CATS().length>1){CATS().pop();save();app.dataset.t='';render()}
+    else if(b.dataset.c!==undefined&&b.classList.contains('bc'))startClue(+b.dataset.c,+b.dataset.i);
+    else if(id==='openb'){open=true;push()} else if(id==='close'){open=false;push()}
+    else if(id==='reveal'){reveal();push()}
+    else if(id==='right'){if(phase==='dd')P[control].score+=ddW;else{P[buzzer].score+=val();control=buzzer}buzzer=null;reveal();push()}
+    else if(id==='wrong'){if(phase==='dd'){P[control].score-=ddW;reveal()}else{P[buzzer].score-=val();locked.push(buzzer);buzzer=null;
+        if(locked.length>=pid().length)reveal();else open=true}push()}
+    else if(id==='back'){phase='board';cur=null;ans=false;push()}
+    else if(id==='setw'){const v=parseInt($('#mw').value,10);if(!isNaN(v))applyWager(control,v)}
+    else if(id==='fin'){phase='fwager';pid().forEach(i=>{P[i].wager=null;P[i].fans=null});done={};push()}
+    else if(id==='fshow'){phase='fans';push()} else if(id==='frev'){phase='freveal';push()}
+    else if(b.dataset.j){const i=b.dataset.j;P[i].score+=(b.dataset.r==='1'?1:-1)*(P[i].wager||0);done[i]=1;push()}
+    else if(id==='fend'){phase='over';push()}
+    else if(id==='exp'){const g=JSON.parse(JSON.stringify(G));['r1','r2'].forEach(r=>g[r].cats.forEach(c=>c.clues.forEach(q=>q.media='')));const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(g,null,2)],{type:'application/json'}));a.download='jeopardy-game.json';a.click()}
+  });
+  app.addEventListener('change',e=>{
+    const t=e.target;
+    if(t.id==='imp'&&t.files[0]){t.files[0].text().then(x=>{const n=norm(JSON.parse(x));if(!n)throw 0;G=n;save();app.dataset.t='';render()}).catch(()=>alert('That file isn’t a valid game export.'));return}
+    
+    if(t.id==='ctrl'){control=t.value||null;push();return}
+    if(t.dataset.f==='file'&&t.files[0]&&assets){const q=CATS()[t.dataset.c].clues[t.dataset.i];t.disabled=true;
+      assets.upload(t.files[0]).then(r=>{q.media=r.url;q.mname=t.files[0].name;save();app.dataset.t='';render()}).catch(()=>{t.disabled=false;alert('Upload failed (max 20 MB).')});return}
+    if(t.dataset.f==='type'||t.dataset.f==='dd'){const q=CATS()[t.dataset.c].clues[t.dataset.i];
+      if(t.dataset.f==='dd')q.dd=t.checked;else{q.type=t.value;q.media='';q.mname=''}save();app.dataset.t='';render()}
+  });
+  app.addEventListener('input',e=>{
+    const t=e.target,f=t.dataset.f;if(!f)return;
+    if(f==='fcat')G.final.cat=t.value;else if(f==='fclue')G.final.clue=t.value;else if(f==='fans')G.final.ans=t.value;
+    else if(f==='name')CATS()[t.dataset.c].name=t.value;
+    else if(f==='text'||f==='ans')CATS()[t.dataset.c].clues[t.dataset.i][f]=t.value;
+    save();
+  });
+  init();
+}
+</script>
+</body>
+</html>
