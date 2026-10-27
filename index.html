@@ -62,8 +62,72 @@ body.play .stage{min-height:calc(100vh - 240px)}
 <script>
 /* ---- Peer-to-peer room (replaces the claude.ai room) ---- */
 const PJ='jeopardy-night-';
+const LAN_MODE=location.hostname==='localhost'||location.hostname==='127.0.0.1'||location.hostname.endsWith('.local')||/^\d{1,3}(?:\.\d{1,3}){3}$/.test(location.hostname);
 function makeRoom(){const h={};return{on:(t,f)=>{(h[t]=h[t]||[]).push(f)},_d:(t,d)=>{(h[t]||[]).forEach(f=>{try{f({data:d})}catch(e){console.error(e)}})}}}
+async function lanPost(path,data){
+  const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(!res.ok)throw new Error((await res.text())||`LAN server returned ${res.status}`);
+  return res.json();
+}
+function lanPollUrl(code,clientId){return'/api/room/poll?'+new URLSearchParams({code,clientId})}
+function lanHostRoom(onReady,previousCode=''){
+  const r=makeRoom();let active=true,redirectCode='';
+  r.emit=(t,d)=>{lanPost('/api/room/send',{code:r.code,clientId:r.clientId,t,d}).catch(e=>console.error('Could not send LAN room message',e))};
+  r.redirect=code=>{redirectCode=code;r.emit('new-room',{code})};
+  r.close=()=>{active=false};
+  const poll=async()=>{
+    while(active){
+      try{
+        const res=await fetch(lanPollUrl(r.code,r.clientId));
+        if(!res.ok)throw new Error(`LAN server returned ${res.status}`);
+        const body=await res.json();
+        if(redirectCode)return;
+        (body.messages||[]).forEach(m=>r._d(m.t,m.d));
+      }catch(e){console.error('LAN room connection lost',e);await new Promise(resolve=>setTimeout(resolve,1500))}
+    }
+  };
+  lanPost('/api/room/create',{previousCode}).then(result=>{
+    r.code=result.code;r.clientId=result.clientId;r.joinBase=result.joinBase;onReady(r);poll();
+  }).catch(e=>{console.error('Could not create LAN room',e);onReady(null)});
+  return r;
+}
+function lanPlayerRoom(code,onReady){
+  const r=makeRoom();let active=false,retryTimer=null,notified=false;
+  r.status='connecting';r.connected=false;
+  const ready=()=>{if(!notified){notified=true;onReady(r)}};
+  const status=s=>{r.status=s;r.connected=s==='connected';r._d('_status',s)};
+  const poll=async()=>{
+    if(active)return;
+    active=true;clearTimeout(retryTimer);status('connecting');
+    try{
+      const joined=await lanPost('/api/room/join',{code,clientId:r.clientId});
+      if(joined.redirectCode){location.replace(joinUrl(joined.redirectCode));active=false;return}
+      status('connected');ready();r._d('_open',1);
+      while(active){
+        const res=await fetch(lanPollUrl(code,r.clientId));
+        if(!res.ok)throw new Error(`LAN server returned ${res.status}`);
+        const body=await res.json();
+        status('connected');
+        for(const m of body.messages||[]){
+          if(m.t==='new-room'&&m.d&&m.d.code){location.replace(joinUrl(m.d.code));active=false;return}
+          r._d(m.t,m.d);
+        }
+      }
+    }catch(e){
+      console.error('LAN room connection lost',e);
+      status('retrying');ready();active=false;
+      retryTimer=setTimeout(poll,1500);
+    }
+  };
+  r.emit=(t,d)=>{if(r.clientId)lanPost('/api/room/send',{code,clientId:r.clientId,t,d}).catch(e=>console.error('Could not send LAN room message',e))};
+  r.retry=()=>{active=false;clearTimeout(retryTimer);poll()};
+  const id=ls.get('jp_transport_id')||('l'+Math.random().toString(36).slice(2,14));
+  r.clientId=id;ls.set('jp_transport_id',id);
+  poll();
+  return r;
+}
 function hostRoom(onReady,previousCode=''){
+  if(LAN_MODE)return lanHostRoom(onReady,previousCode);
   const r=makeRoom(),conns=new Set();let peer,tries=0,done=false,timer;
   const fin=v=>{if(!done){done=true;clearTimeout(timer);onReady(v)}};
   r.emit=(t,d)=>conns.forEach(c=>{try{c.open&&c.send({t,d})}catch(e){console.error('Could not send room message',e)}});
@@ -87,6 +151,7 @@ function hostRoom(onReady,previousCode=''){
   return r;
 }
 function playerRoom(code,onReady){
+  if(LAN_MODE)return lanPlayerRoom(code,onReady);
   const r=makeRoom();let conn=null,peer=null,retryTimer=null,delay=1500,notified=false;
   const ready=()=>{if(!notified){notified=true;onReady(r)}};
   r.status='connecting';r.connected=false;
@@ -134,7 +199,7 @@ function playerRoom(code,onReady){
   openPeer();
   return r;
 }
-const joinUrl=code=>location.href.split(/[?#]/)[0]+'?join='+code;
+const joinUrl=code=>((LAN_MODE&&room&&room.joinBase)?room.joinBase:location.href.split(/[?#]/)[0])+'?join='+code;
 </script>
 <script>
 const $=s=>document.querySelector(s), app=$('#app');
