@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Jeopardy Night</title>
+<title>GhostHaus Xmas Jeopardy!</title>
 <style>
 :root{--bg:#f3f4f9;--fg:#14172b;--card:#fff;--line:#d3d8e8;--mute:#5d6485;--blue:#0a1a8c;--gold:#ffcc33;--ok:#1f9d55;--bad:#d64545;
 box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -63,26 +63,71 @@ body.play .stage{min-height:calc(100vh - 240px)}
 /* ---- Peer-to-peer room (replaces the claude.ai room) ---- */
 const PJ='jeopardy-night-';
 function makeRoom(){const h={};return{on:(t,f)=>{(h[t]=h[t]||[]).push(f)},_d:(t,d)=>{(h[t]||[]).forEach(f=>{try{f({data:d})}catch(e){console.error(e)}})}}}
-function hostRoom(onReady){
-  const r=makeRoom(),conns=new Set();let tries=0,done=false;
-  const fin=v=>{if(!done){done=true;onReady(v)}};
-  r.emit=(t,d)=>conns.forEach(c=>{try{c.open&&c.send({t,d})}catch(e){}});
-  const start=()=>{const A='ABCDEFGHJKMNPQRSTUVWXYZ';let code='';for(let i=0;i<4;i++)code+=A[Math.floor(Math.random()*A.length)];
-    let peer;try{peer=new Peer(PJ+code)}catch(e){fin(null);return}
-    peer.on('open',()=>{r.code=code;fin(r)});
-    peer.on('error',e=>{if(e.type==='unavailable-id'&&tries++<5)start();else fin(null)});
-    peer.on('connection',c=>{conns.add(c);c.on('data',m=>m&&r._d(m.t,m.d));c.on('close',()=>conns.delete(c));c.on('error',()=>conns.delete(c))})};
-  start();setTimeout(()=>fin(null),10000);
+function hostRoom(onReady,previousCode=''){
+  const r=makeRoom(),conns=new Set();let peer,tries=0,done=false,timer;
+  const fin=v=>{if(!done){done=true;clearTimeout(timer);onReady(v)}};
+  r.emit=(t,d)=>conns.forEach(c=>{try{c.open&&c.send({t,d})}catch(e){console.error('Could not send room message',e)}});
+  r.close=()=>{conns.forEach(c=>c.close());conns.clear();if(peer&&!peer.destroyed)peer.destroy()};
+  const start=()=>{
+    const A='ABCDEFGHJKMNPQRSTUVWXYZ23456789';let code='';
+    do{code='';for(let i=0;i<6;i++)code+=A[Math.floor(Math.random()*A.length)]}while(code===previousCode);
+    let attempt;try{attempt=new Peer(PJ+code)}catch(e){fin(null);return}
+    peer=attempt;
+    attempt.on('open',()=>{if(done||peer!==attempt)return;r.code=code;fin(r)});
+    attempt.on('error',e=>{
+      if(done||peer!==attempt)return;
+      if(e.type==='unavailable-id'&&tries++<5){attempt.destroy();start()}
+      else{attempt.destroy();fin(null)}
+    });
+    attempt.on('connection',c=>{conns.add(c);c.on('data',m=>m&&r._d(m.t,m.d));c.on('close',()=>conns.delete(c));c.on('error',()=>conns.delete(c))})
+  };
+  timer=setTimeout(()=>{if(peer&&!peer.destroyed)peer.destroy();fin(null)},10000);
+  start();
+  return r;
 }
 function playerRoom(code,onReady){
-  const r=makeRoom();let conn=null;
-  r.emit=(t,d)=>{try{conn&&conn.open&&conn.send({t,d})}catch(e){}};
-  let peer;try{peer=new Peer()}catch(e){onReady(null);return}
-  const connect=()=>{conn=peer.connect(PJ+code,{reliable:true});
-    conn.on('open',()=>r._d('_open',1));conn.on('data',m=>m&&r._d(m.t,m.d));
-    conn.on('close',()=>setTimeout(connect,2000));conn.on('error',()=>{})};
-  peer.on('open',()=>{connect();onReady(r)});
-  peer.on('error',e=>{if(e.type==='peer-unavailable')setTimeout(connect,3000);else if(e.type==='network'||e.type==='server-error')onReady(null)});
+  const r=makeRoom();let conn=null,peer=null,retryTimer=null,delay=1500,notified=false;
+  const ready=()=>{if(!notified){notified=true;onReady(r)}};
+  r.status='connecting';r.connected=false;
+  const status=s=>{r.status=s;r.connected=s==='connected';r._d('_status',s)};
+  const schedule=ms=>{clearTimeout(retryTimer);retryTimer=setTimeout(connect,ms)};
+  const connect=()=>{
+    if(!peer||peer.destroyed||conn)return;
+    status('connecting');
+    let c;try{c=peer.connect(PJ+code,{reliable:true})}catch(e){status('error');schedule(delay);delay=Math.min(delay*2,10000);return}
+    conn=c;
+    const failed=()=>{
+      if(conn!==c)return;
+      conn=null;
+      status('retrying');
+      try{c.close()}catch(e){console.error('Could not close room connection',e)}
+      schedule(delay);delay=Math.min(delay*2,10000);
+    };
+    c.on('open',()=>{if(conn!==c)return;delay=1500;status('connected');r._d('_open',1)});
+    c.on('data',m=>{if(m&&m.t==='new-room'&&m.d&&m.d.code){location.replace(joinUrl(m.d.code));return}if(m)r._d(m.t,m.d)});
+    c.on('close',failed);
+    c.on('error',failed);
+  };
+  const openPeer=()=>{
+    let attempt;try{attempt=new Peer()}catch(e){status('error');ready();return}
+    peer=attempt;
+    attempt.on('open',()=>{if(peer!==attempt)return;ready();connect()});
+    attempt.on('error',e=>{
+      if(peer!==attempt)return;
+      if(e.type==='peer-unavailable'){status('unavailable');schedule(3000)}
+      else{status('error');schedule(5000)}
+      ready();
+    });
+    attempt.on('disconnected',()=>{if(peer!==attempt)return;status('error');try{attempt.reconnect()}catch(e){console.error('Could not reconnect to signaling server',e)}});
+  };
+  r.emit=(t,d)=>{try{if(conn&&conn.open){conn.send({t,d});return true}}catch(e){console.error('Could not send room message',e)}return false};
+  r.retry=()=>{
+    clearTimeout(retryTimer);conn=null;
+    if(peer&&!peer.destroyed)peer.destroy();
+    peer=null;delay=1500;status('connecting');openPeer();
+  };
+  openPeer();
+  return r;
 }
 const joinUrl=code=>location.href.split(/[?#]/)[0]+'?join='+code;
 </script>
@@ -101,10 +146,16 @@ if(isPlayer){
   ls.set('jp_id',me.id);
   const join=()=>{if(me.name)emit('join',{id:me.id,name:me.name})};
   const draw=()=>{
-    if(!me.name){app.innerHTML=`<div class="phone"><h1>Jeopardy Night</h1><input id="nm" placeholder="Your name" maxlength="16" style="font-size:22px;text-align:center"><button class="pri" id="go" style="font-size:22px">Join game</button></div>`;
+    if(!me.name){app.innerHTML=`<div class="phone"><h1>GhostHaus Christmas Jeopardy</h1><input id="nm" placeholder="Your name" maxlength="16" style="font-size:22px;text-align:center"><button class="pri" id="go" style="font-size:22px">Join game</button></div>`;
       $('#go').onclick=()=>{const v=$('#nm').value.trim();if(!v)return;me.name=v;ls.set('jp_name',v);join();draw()};return}
-    if(!room){app.innerHTML=`<div class="phone"><div class="big">Connecting…</div><p class="note">If this takes more than a few seconds, check your internet and the room code.</p></div>`;return}
-    if(!S){app.innerHTML=`<div class="phone"><div class="big">Hi ${esc(me.name)}!</div><p class="note">Waiting for the host…</p></div>`;return}
+    if(!room){app.innerHTML=`<div class="phone"><div class="big">Connecting…</div><p class="note">Connecting to the game service.</p></div>`;return}
+    if(!S||!room.connected){
+      const message=room.status==='unavailable'?'Host not found. Check the room code and make sure the host has started the game.':
+        room.status==='retrying'?'Connection lost. Retrying…':
+        room.status==='error'?'Could not reach the connection service. Check your internet and retry.':
+        room.connected?'Connected to host. Waiting for the game…':'Connecting to host…';
+      app.innerHTML=`<div class="phone"><div class="big">Hi ${esc(me.name)}!</div><p class="note">${message}</p><button class="pri" id="retry">Retry connection</button></div>`;return
+    }
     const p=S.players[me.id]; const sc=p?p.s:0; let h=`<div class="phone"><div class="note">${esc(me.name)}</div><div class="big">$${sc}</div>`;
     const wagerBox=(max,topic,label)=>`<div>${label}</div><input id="wg" type="number" inputmode="numeric" min="0" max="${max}" placeholder="0–${max}" style="font-size:26px;text-align:center;width:180px"><button class="pri" id="wb">Lock in wager</button>`;
     if(S.phase==='clue'){
@@ -125,11 +176,15 @@ if(isPlayer){
     const fb=$('#fb');if(fb)fb.onclick=()=>{emit('fans',{id:me.id,text:$('#fa').value.slice(0,200)});fb.textContent='Sent ✓'};
   };
   draw();
-  (async()=>{room=await new Promise(res=>playerRoom(joinCode.toUpperCase(),res));if(!room){draw();return}
-    room.on('_open',join);room.on('state',m=>{S=m.data;if(!S.players[me.id])join();
+  room=playerRoom(joinCode.toUpperCase(),r=>{
+    room=r;
+    r.on('_open',join);
+    r.on('_status',()=>{if(!r.connected)S=null;if(me.name)draw()});
+    r.on('state',m=>{S=m.data;if(!me.name)return;if(!S.players[me.id])join();
       const a=document.activeElement; if(a&&(a.id==='wg'||a.id==='fa'))return; draw()});
-    join();draw();setInterval(()=>{if(!S)join()},2500);
-  })();
+    join();draw();
+  });
+  app.addEventListener('click',e=>{if(e.target.closest('#retry')){S=null;room.retry();draw()}});
 }
 
 /* ================= HOST ================= */
@@ -210,7 +265,7 @@ else{
   function scoreboard(){return pid().length?pid().map(i=>`<div class="pl${buzzer===i?' hot':''}${control===i?' ctrl':''}"><div class="note">${who(i)}</div><b>$${P[i].score}</b></div>`).join(''):`<div class="note">No players yet. Have players open the join link shown above on their phones.</div>`}
 
   function render(){
-    const nb=`<header><h1>JEOPARDY NIGHT</h1>${started?`<button id="fs">⛶ Fullscreen</button><span class="note">Round ${pr}</span>`:`<button id="tE" class="${tab==='edit'?'on':''}">✏️ Edit questions</button><button id="tP">▶ Start game</button>`}
+    const nb=`<header><h1>GhostHaus Christmas Jeopardy</h1>${started?`<button id="fs">⛶ Fullscreen</button><span class="note">Round ${pr}</span>`:`<button id="tE" class="${tab==='edit'?'on':''}">✏️ Edit questions</button><button id="tP">▶ Start game</button>`}
       <span class="note">${room?'● room <b>'+room.code+'</b> · '+pid().length+' player(s)':'○ not connected'}</span></header>`;
     if(tab==='edit'){const f=document.activeElement;if(f&&f.dataset&&f.dataset.f&&document.body.contains(f)&&f.id!=='x'&&app.dataset.t==='edit'){return}
       app.dataset.t='edit';app.innerHTML=nb+`<main>${room?`<div class="note">Players can already join: open <b>${esc(joinUrl(room.code))}</b> on their phones (room ${room.code}).</div>`:''}${editor()}</main>`;return}
@@ -231,25 +286,38 @@ else{
     if(phase==='ddwager'&&id===control){ddW=Math.max(5,Math.min(maxW,a|0));phase='dd';push()}
     else if(phase==='fwager'&&P[id]&&P[id].score>0){P[id].wager=Math.max(0,Math.min(P[id].score,a|0));push()}
   }
-  function onMsg(t,d,fn){room.on(t,m=>{if(m.data&&typeof m.data==='object')fn(m.data)})}
+  function onMsg(source,t,fn){source.on(t,m=>{if(m.data&&typeof m.data==='object')fn(m.data)})}
+  function bindRoom(nextRoom){
+    room=nextRoom;
+    onMsg(room,'join',d=>{const n=String(d.name||'').slice(0,16);if(!d.id||!n)return;
+      if(!P[d.id])P[d.id]={name:n,score:0,wager:null,fans:null};else P[d.id].name=n;
+      if(!control)control=d.id;push()});
+    onMsg(room,'buzz',d=>{if(phase==='clue'&&open&&!buzzer&&P[d.id]&&!locked.includes(d.id)){buzzer=d.id;open=false;push()}});
+    onMsg(room,'wager',d=>applyWager(d.id,parseInt(d.amount,10)||0));
+    onMsg(room,'fans',d=>{if(phase==='fans'&&P[d.id]){P[d.id].fans=String(d.text||'').slice(0,200);push()}});
+  }
   async function init(){
     assets={upload:f=>Promise.resolve({url:URL.createObjectURL(f)})};
-    room=await new Promise(res=>hostRoom(res));
-    if(room){
-      onMsg('join',d=>{const n=String(d.name||'').slice(0,16);if(!d.id||!n)return;
-        if(!P[d.id])P[d.id]={name:n,score:0,wager:null,fans:null};else P[d.id].name=n;
-        if(!control)control=d.id;push()});
-      onMsg('buzz',d=>{if(phase==='clue'&&open&&!buzzer&&P[d.id]&&!locked.includes(d.id)){buzzer=d.id;open=false;push()}});
-      onMsg('wager',d=>applyWager(d.id,parseInt(d.amount,10)||0));
-      onMsg('fans',d=>{if(phase==='fans'&&P[d.id]){P[d.id].fans=String(d.text||'').slice(0,200);push()}});
-      setInterval(broadcast,3000);
-    }
+    const initialRoom=await new Promise(res=>hostRoom(res));
+    if(initialRoom){bindRoom(initialRoom);setInterval(broadcast,3000)}
     renderFull();
+  }
+  async function startGame(button){
+    if(started)return;
+    button.disabled=true;
+    const previousRoom=room;
+    const nextRoom=await new Promise(res=>hostRoom(res,previousRoom&&previousRoom.code));
+    if(!nextRoom){button.disabled=false;alert('Could not create a new game room. Check your internet connection and try again.');return}
+    bindRoom(nextRoom);
+    if(previousRoom){previousRoom.emit('new-room',{code:nextRoom.code});setTimeout(()=>previousRoom.close(),1000)}
+    started=true;tab='play';pr=1;used=new Set();
+    document.body.classList.add('play');try{document.documentElement.requestFullscreen().catch(()=>{})}catch(e){}
+    renderFull();broadcast();
   }
 
   app.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b)return;const id=b.id;
-    if(id==='tE'&&!started){tab='edit';app.dataset.t='';render()} else if(id==='tP'||id==='toplay'){if(started)return;started=true;tab='play';pr=1;used=new Set();document.body.classList.add('play');try{document.documentElement.requestFullscreen().catch(()=>{})}catch(e){}renderFull();broadcast()}
+    if(id==='tE'&&!started){tab='edit';app.dataset.t='';render()} else if(id==='tP'||id==='toplay')startGame(b);
     else if(id==='fs'){try{document.documentElement.requestFullscreen().catch(()=>{})}catch(e){}}
     else if(id==='r1'||id==='r2'){er=id==='r1'?1:2;app.dataset.t='';render()}
     else if(id==='nr'){pr=2;used=new Set();phase='board';cur=null;ans=false;const ids=pid();if(ids.length)control=ids.sort((a,b)=>P[a].score-P[b].score)[0];push()}
