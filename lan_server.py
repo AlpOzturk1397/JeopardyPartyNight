@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import argparse
+import ipaddress
 import json
 import secrets
 import socket
@@ -15,7 +17,7 @@ from urllib.parse import parse_qs, urlparse
 
 
 ROOT = Path(__file__).resolve().parent
-PORT = 8000
+DEFAULT_PORT = 8000
 ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 MAX_BODY = 64 * 1024
 POLL_TIMEOUT = 15
@@ -41,7 +43,8 @@ def lan_addresses() -> list[str]:
     try:
         for result in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
             address = result[4][0]
-            if not address.startswith("127."):
+            ip = ipaddress.ip_address(address)
+            if not ip.is_loopback and not ip.is_link_local:
                 addresses.add(address)
     except OSError:
         pass
@@ -50,13 +53,14 @@ def lan_addresses() -> list[str]:
         try:
             probe.connect(("192.0.2.1", 80))
             address = probe.getsockname()[0]
-            if not address.startswith("127."):
+            ip = ipaddress.ip_address(address)
+            if not ip.is_loopback and not ip.is_link_local:
                 addresses.add(address)
         except OSError:
             pass
         finally:
             probe.close()
-    return sorted(addresses)
+    return sorted(addresses, key=lambda value: not ipaddress.ip_address(value).is_private)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -134,11 +138,12 @@ class Handler(BaseHTTPRequestHandler):
                     ROOMS[code] = Room(client_id)
                     break
         addresses = lan_addresses()
-        bases = [f"http://{address}:{PORT}/" for address in addresses]
+        port = self.server.server_port
+        bases = [f"http://{address}:{port}/" for address in addresses]
         self.send_json(200, {
             "code": code,
             "clientId": client_id,
-            "joinBase": bases[0] if bases else f"http://{self.headers.get('Host', f'localhost:{PORT}')}/",
+            "joinBase": bases[0] if bases else f"http://{self.headers.get('Host', f'localhost:{port}')}/",
             "joinBases": bases,
         })
 
@@ -226,15 +231,24 @@ class Server(ThreadingHTTPServer):
 
 
 def main() -> None:
-    server = Server(("0.0.0.0", PORT), Handler)
+    parser = argparse.ArgumentParser(description="Host JeopardyPartyNight on a local network.")
+    parser.add_argument("--host", default="0.0.0.0", help="Interface to bind (default: all interfaces)")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"TCP port (default: {DEFAULT_PORT}; use 0 for an available port)")
+    args = parser.parse_args()
+    if not 0 <= args.port <= 65535:
+        parser.error("--port must be between 0 and 65535")
+    server = Server((args.host, args.port), Handler)
+    port = server.server_port
     print("Jeopardy LAN server is running.")
-    print(f"On this laptop: http://localhost:{PORT}/")
-    addresses = lan_addresses()
+    print(f"On this laptop: http://localhost:{port}/")
+    addresses = lan_addresses() if args.host in ("0.0.0.0", "") else []
     if addresses:
         for address in addresses:
-            print(f"On the same Wi-Fi/LAN: http://{address}:{PORT}/")
+            print(f"On the same Wi-Fi/LAN: http://{address}:{port}/")
+    elif args.host not in ("0.0.0.0", ""):
+        print(f"Bound to: http://{args.host}:{port}/")
     else:
-        print("No LAN address detected. Find this laptop's IPv4 address and use port 8000.")
+        print(f"No LAN address detected. Find this laptop's IPv4 address and use port {port}.")
     print("Keep this window open. Press Ctrl+C to stop the server.")
     try:
         server.serve_forever()
