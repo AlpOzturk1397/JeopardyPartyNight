@@ -41,6 +41,15 @@ main{padding:16px;max-width:1300px;margin:0 auto}
 .score{display:flex;gap:10px;flex-wrap:wrap}
 .pl{background:var(--card);border:2px solid var(--line);border-radius:10px;padding:8px 14px;min-width:120px;text-align:center}
 .pl.hot{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold)}.pl.ctrl{border-color:var(--ok)}
+.pl.pick{border-color:#e87816;box-shadow:0 0 0 3px #e8781680}.pl.leader{border-color:var(--gold)}
+.pl.custom{color:#fff;text-shadow:0 1px 3px #000;background-color:var(--player-color,var(--card));background-image:linear-gradient(#0005,#0005),var(--player-photo,none);background-size:cover;background-position:center}
+.pl.custom .note{color:#fff}.pl .badge{display:block;font-size:12px;font-weight:800;letter-spacing:.06em;text-shadow:0 1px 3px #000}
+.name-roster .pl{position:relative}
+.remove-player{font-size:12px;padding:4px 8px;margin-top:5px}
+.color-presets{display:flex;gap:8px;margin:6px 0}
+.color-preset{width:38px;height:38px;padding:0;border-radius:50%;border:2px solid var(--line)}
+.color-preset.selected{outline:3px solid var(--fg);outline-offset:2px}
+.photo-preview{height:90px;border-radius:8px;background-position:center;background-size:cover;background-color:var(--line);margin:6px 0}
 .pl b{display:block;font-size:22px}
 .score-name{min-width:100px}
 .score-name svg{display:block;width:100%;height:34px;margin:2px auto}
@@ -232,7 +241,7 @@ function playerRoom(code,onReady){
   return r;
 }
 const pageBase=()=>((LAN_MODE&&room&&room.joinBase)?room.joinBase:location.href.split(/[?#]/)[0]);
-const joinUrl=code=>pageBase()+'?join='+encodeURIComponent(code);
+const joinUrl=code=>pageBase()+'?join='+encodeURIComponent(code)+(new URLSearchParams(location.search).get('ready')==='1'?'&ready=1':'');
 const joinPageUrl=()=>pageBase()+'?join';
 const roomBases=()=>room&&Array.isArray(room.joinBases)&&room.joinBases.length?room.joinBases:[pageBase()];
 </script>
@@ -251,6 +260,14 @@ const formatTime=seconds=>`${Math.floor(seconds/60)}:${String(seconds%60).padSta
 /* ================= PHONE BUZZER ================= */
 if(isPlayer){
   const newPlayerId=()=>`p${Math.random().toString(36).slice(2,9)}`;
+  const updateReadyQuery=ready=>{
+    const query=new URLSearchParams(location.search);
+    if(ready)query.set('ready','1');else query.delete('ready');
+    const suffix=query.toString();history.replaceState(null,'',location.pathname+(suffix?'?'+suffix:'')+location.hash);
+  };
+  const cleanColor=value=>/^#[0-9a-f]{6}$/i.test(String(value||''))?String(value):'#ffffff';
+  const cleanPhoto=value=>typeof value==='string'&&value.length<=12000&&/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(value)?value:'';
+  const colorPresets=['#0a1a8c','#1f7a5a','#a43b49','#7046a8'];
   const savedProfiles=(()=>{try{const value=JSON.parse(ls.get('jp_profiles')||'[]');return Array.isArray(value)?value.filter(p=>p&&typeof p.id==='string'&&p.id):[]}catch(e){return []}})();
   const storedId=ls.get('jp_id'), legacyId=storedId||newPlayerId();
   const legacyStrokes=(()=>{try{const value=JSON.parse(ls.get('jp_name_ink')||'[]');return Array.isArray(value)?value:[]}catch(e){return []}})();
@@ -259,17 +276,19 @@ if(isPlayer){
     id:legacyId,
     name:currentProfile?String(currentProfile.name||''):ls.get('jp_name')||'',
     mode:currentProfile&&currentProfile.mode==='team'||!currentProfile&&ls.get('jp_mode')==='team'?'team':'solo',
-    team:currentProfile?String(currentProfile.team||''):ls.get('jp_team')||''
+    team:currentProfile?String(currentProfile.team||''):ls.get('jp_team')||'',
+    color:cleanColor(currentProfile&&currentProfile.color),
+    photo:cleanPhoto(currentProfile&&currentProfile.photo)
   }, nameStrokes=Array.isArray(currentProfile&&currentProfile.nameStrokes)?currentProfile.nameStrokes:legacyStrokes,
-    answerStrokes=[], drawing=false, choosingProfile=false;
+    answerStrokes=[], drawing=false, choosingProfile=false, readyToJoin=params.get('ready')==='1', removed=false;
   if(!currentProfile&&storedId){profiles.push({id:me.id,name:me.name,mode:me.mode,team:me.team,nameStrokes});ls.set('jp_profiles',JSON.stringify(profiles))}
   ls.set('jp_id',me.id);
   const hasName=()=>Boolean(me.name||nameStrokes.some(st=>st.length>1));
-  const join=()=>{if(hasName())emit('join',{id:me.id,name:me.name,mode:me.mode,team:me.team,nameStrokes})};
+  const join=()=>{if(readyToJoin&&!removed&&hasName())emit('join',{id:me.id,name:me.name,mode:me.mode,team:me.team,nameStrokes,color:me.color,photo:me.photo})};
   const teamKey=p=>p&&p.mode==='team'?'team:'+encodeURIComponent(String(p.team||'').trim().toLowerCase()):'solo:'+p.id;
   const myGroup=()=>teamKey({id:me.id,mode:me.mode,team:me.team});
   const saveProfile=()=>{
-    const profile={id:me.id,name:me.name,mode:me.mode,team:me.team,nameStrokes};
+    const profile={id:me.id,name:me.name,mode:me.mode,team:me.team,nameStrokes,color:cleanColor(me.color),photo:cleanPhoto(me.photo)};
     const index=profiles.findIndex(p=>p.id===me.id);
     if(index<0)profiles.push(profile);else profiles[index]=profile;
     ls.set('jp_profiles',JSON.stringify(profiles));ls.set('jp_id',me.id);
@@ -282,13 +301,17 @@ if(isPlayer){
     <p class="note">Saved players on this device keep their existing game identity and score.</p>
   </div></div>`;
   const pickForm=(code='')=>`<div class="phone"><h1>GhostHaus Christmas Jeopardy</h1><div class="card">
-    <h2>Join a game</h2><label>Room code<input id="jc" value="${esc(code)}" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="6-character code"></label>
+    <h2>Join a game</h2><label>Room code<input id="jc" value="${esc(code)}" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="6-character code"${code?' readonly':''}></label>
     <label>Your name (type or write below)<input id="nm" value="${esc(me.name)}" maxlength="16" autocomplete="name" placeholder="Your name"></label>
     <canvas class="name-pad" id="name-pad" aria-label="Write your name"></canvas><div class="row"><button id="clear-name">Clear writing</button></div>
     <label>Play style<select id="pm"><option value="solo"${me.mode==='solo'?' selected':''}>Solo player</option><option value="team"${me.mode==='team'?' selected':''}>Team member</option></select></label>
     <label id="team-label">Team name<input id="tn" value="${esc(me.team)}" maxlength="24" placeholder="Enter your team name"></label>
+    <label>Player/team card colour</label><div class="color-presets">${colorPresets.map(color=>`<button type="button" class="color-preset${me.color===color?' selected':''}" data-color="${color}" style="background:${color}" aria-label="Choose ${color}"></button>`).join('')}</div>
+    <label>Choose any colour<input type="color" id="pc" value="${cleanColor(me.color)}" aria-label="Choose a custom card colour"></label>
+    <label>Card background photo<input type="file" id="photo" accept="image/*"></label><div class="photo-preview" id="photo-preview" style="${me.photo?`background-image:linear-gradient(#0002,#0002),url('${me.photo}')`:''}"></div><button type="button" id="clear-photo">Remove background photo</button>
+    <p class="note">For teams, the first member to join sets the shared team card appearance.</p>
     ${profiles.length?'<button id="choose-player" style="width:100%;margin-bottom:8px">Choose a saved player</button>':''}
-    <button class="pri" id="go" style="width:100%">Join game</button>
+    <button class="pri" id="go" style="width:100%">I’m ready — join game</button>
     <p class="note">Solo players can pick clues. Team members must agree on a clue before their team vote is counted.</p>
   </div></div>`;
   const setupNamePad=()=>{
@@ -302,22 +325,52 @@ if(isPlayer){
     pad.onpointerup=pad.onpointercancel=()=>{drawing=false;saveProfile()};
     const clear=$('#clear-name');if(clear)clear.onclick=()=>{nameStrokes=[];saveProfile();paint()};
   };
-  const setupPickForm=(code,done)=>{
+  const setupPickForm=code=>{
     app.innerHTML=pickForm(code);const pm=$('#pm'),label=$('#team-label');label.hidden=pm.value!=='team';pm.onchange=()=>{label.hidden=pm.value!=='team'};
     setupNamePad();
-    $('#go').onclick=()=>{me.name=$('#nm').value.trim();me.mode=$('#pm').value;me.team=$('#tn').value.trim();
+    $('#go').onclick=()=>{const v=$('#jc').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+      if(v.length!==6){alert('Enter the 6-character room code.');return}
+      me.name=$('#nm').value.trim();me.mode=$('#pm').value;me.team=$('#tn').value.trim();me.color=cleanColor($('#pc').value);
       if(!hasName()||me.mode==='team'&&!me.team){alert('Enter or write your name and, for team play, a team name.');return}
-      saveProfile();done()};
+      saveProfile();
+      if(!joinCode){location.search='?join='+encodeURIComponent(v)+'&ready=1';return}
+      readyToJoin=true;removed=false;updateReadyQuery(true);join();draw()};
   };
+  const makePhoto=async file=>{
+    const url=URL.createObjectURL(file);
+    try{
+      const image=new Image();
+      await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('Could not read that image.'));image.src=url});
+      const canvas=document.createElement('canvas'),scale=Math.min(1,320/image.width,240/image.height);
+      canvas.width=Math.max(1,Math.round(image.width*scale));canvas.height=Math.max(1,Math.round(image.height*scale));
+      const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0,canvas.width,canvas.height);
+      let data='';
+      for(let attempt=0;attempt<5;attempt++){
+        data=canvas.toDataURL('image/jpeg',[0.68,0.55,0.45,0.38,0.32][attempt]);
+        if(data.length<=10500)return data;
+        canvas.width=Math.max(80,Math.round(canvas.width*.8));canvas.height=Math.max(60,Math.round(canvas.height*.8));
+        ctx.drawImage(image,0,0,canvas.width,canvas.height);
+      }
+      if(data.length>12000)throw new Error('That photo could not be compressed enough. Try a smaller image.');
+      return data;
+    }finally{URL.revokeObjectURL(url)}
+  };
+  const previewPhoto=()=>{const preview=$('#photo-preview');if(preview)preview.style.backgroundImage=me.photo?`linear-gradient(#0002,#0002),url('${me.photo}')`:''};
+  app.addEventListener('input',e=>{
+    if(e.target.id!=='pc')return;
+    me.color=cleanColor(e.target.value);saveProfile();
+    app.querySelectorAll('[data-color]').forEach(button=>button.classList.toggle('selected',button.dataset.color===me.color));
+  });
+  app.addEventListener('change',async e=>{
+    if(e.target.id!=='photo'||!e.target.files[0])return;
+    try{me.photo=await makePhoto(e.target.files[0]);saveProfile();previewPhoto()}
+    catch(error){console.error('Could not use player card photo',error);alert(error.message||'Could not use that photo.')}
+    e.target.value='';
+  });
   const draw=()=>{
     if(choosingProfile){app.innerHTML=profilePicker();return}
-    if(!joinCode){app.innerHTML=pickForm();const pm=$('#pm'),label=$('#team-label');label.hidden=pm.value!=='team';pm.onchange=()=>{label.hidden=pm.value!=='team'};
-      setupNamePad();
-      $('#go').onclick=()=>{const v=$('#jc').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');if(v.length!==6){alert('Enter the 6-character room code.');return}
-        me.name=$('#nm').value.trim();me.mode=$('#pm').value;me.team=$('#tn').value.trim();
-        if(!hasName()||me.mode==='team'&&!me.team){alert('Enter or write your name and, for team play, a team name.');return}
-        saveProfile();location.search='?join='+encodeURIComponent(v)};return}
-    if(!hasName()){setupPickForm(joinCode.toUpperCase(),()=>{join();draw()});return}
+    if(removed){app.innerHTML=`<div class="phone"><div class="big">You were removed from this game</div><p class="note">Ask the host to add you again, or switch to a new player profile.</p><button id="switch-player">Switch player / join as new</button></div>`;return}
+    if(!joinCode||!readyToJoin||!hasName()){setupPickForm(joinCode.toUpperCase());return}
     if(!room){app.innerHTML=`<div class="phone"><div class="big">Connecting…</div><p class="note">Connecting to the game service.</p></div>`;return}
     if(!S||!room.connected){
       const message=room.status==='unavailable'?'Host not found. Check the room code and make sure the host has started the game.':
@@ -326,6 +379,7 @@ if(isPlayer){
         room.connected?'Connected to host. Waiting for the game…':'Connecting to host…';
       app.innerHTML=`<div class="phone"><div class="big">Hi ${esc(me.name||'Player')}!</div><p class="note">${message}</p>${S&&S.playerCount>=20&&!S.players[me.id]?'<p class="warn">This game is full (20 players maximum).</p>':''}${room.lastError?`<details><summary>Connection details</summary><code>${esc(room.lastError)}</code></details>`:''}<button class="pri" id="retry">Retry connection</button><button id="switch-player">Switch player / join as new</button></div>`;return
     }
+    if((S.removed||[]).includes(me.id)){removed=true;readyToJoin=false;draw();return}
     const p=S.players[me.id];
     if(!p&&S.playerCount>=S.maxPlayers){app.innerHTML=`<div class="phone"><div class="big">Game is full</div><p class="note">This game supports up to ${S.maxPlayers} players.</p></div>`;return}
     const sc=p?p.s:0; let h=`<div class="phone"><div class="note">${esc(p?.n||me.name||'Player')}${me.mode==='team'?' · '+esc(me.team):' · Solo'}</div><div class="big">$${sc}</div><button id="switch-player">Switch player / join as new</button>`;
@@ -336,16 +390,17 @@ if(isPlayer){
       if(S.buzzer&&!mine)h+=`<div class="note">${esc(S.players[S.buzzer]?.n||'Someone')} buzzed first</div>`;
     }else if(S.phase==='board'){
       const selected=S.votes&&S.votes[me.id];
-      h+=`<div class="big">Choose the next clue</div><div class="note">${me.mode==='team'?'Team vote counts when every connected team member chooses the same clue.':'Your pick starts the clue; the host will open the buzzers.'}${selected?' Your current pick is highlighted.':''}</div>
-      <div class="mobile-board-scroll"><div class="board mobile-board" style="grid-template-columns:repeat(${Math.max(1,(S.categories||[]).length)},minmax(90px,1fr));min-width:${Math.max(1,(S.categories||[]).length)*96}px">${(S.categories||[]).map(c=>`<div class="bc h">${esc(c)}</div>`).join('')}${(S.cells||[]).map(q=>`<button class="bc${q.available?'':' used'}${selected===q.key?' on':''}" data-vote="${q.key}" ${q.available?'':'disabled'}>${q.available?'$'+q.value:'—'}</button>`).join('')}</div></div>${!(S.board||[]).length?'<span class="note">No clues remain on this board.</span>':''}`;
+      const canPick=S.pickerGroup===myGroup();
+      h+=`<div class="big">Choose the next clue</div><div class="note">${canPick?'Your turn — your team must agree on a clue.':`Waiting for ${esc(S.pickerName||'the previous correct player/team')} to choose.`}${selected?' Your current pick is highlighted.':''}</div>
+      <div class="mobile-board-scroll"><div class="board mobile-board" style="grid-template-columns:repeat(${Math.max(1,(S.categories||[]).length)},minmax(90px,1fr));min-width:${Math.max(1,(S.categories||[]).length)*96}px">${(S.categories||[]).map(c=>`<div class="bc h">${esc(c)}</div>`).join('')}${(S.cells||[]).map(q=>`<button class="bc${q.available?'':' used'}${selected===q.key?' on':''}" data-vote="${q.key}" ${q.available&&canPick?'':'disabled'}>${q.available?'$'+q.value:'—'}</button>`).join('')}</div></div>${!(S.board||[]).length?'<span class="note">No clues remain on this board.</span>':''}`;
     }else if(S.phase==='ddwager'){
       h+=S.control===me.id?`<div class="big">DAILY DOUBLE!</div>`+wagerBox(S.maxW,'Wager (min $5)'):`<div class="note">${esc(S.players[S.control]?.n||'A player')} is wagering on a Daily Double…</div>`;
     }else if(S.phase==='fwager'){
       const eligible=sc>0, lockedW=(S.wagered||[]).includes(myGroup());
-      h+=eligible&&!lockedW?`<div class="big">Final: ${esc(S.fcat)}</div>`+wagerBox(sc,'Wager up to $'+sc):`<div class="note">${eligible?'Your team’s wager is locked.':'Final Jeopardy: your team needs a positive score to play.'}</div>`;
+      h+=eligible&&!lockedW?`<div class="big">Final: ${esc(S.fcat)}</div>`+wagerBox(sc,'Wager up to $'+sc):`<div class="note">${eligible?'Your team’s wager is locked.':`You cannot participate in Final Jeopardy because your team’s balance is $${sc}; a positive balance is required.`}</div>`;
     }else if(S.phase==='fans'){
       const already=(S.answered||[]).includes(myGroup());
-      h+=sc>0&&!already&&S.remaining>0?`<div class="big">Write your answer</div><div class="countdown">${formatTime(S.remaining)}</div><canvas class="answer-pad" id="pad" aria-label="Handwriting area"></canvas><div class="row"><button id="clear-pad">Clear writing</button><button id="toggle-typing">Type instead</button></div><textarea id="fa" rows="2" placeholder="Typed answer (optional)" style="display:none;width:90%;font-size:20px"></textarea><button class="pri" id="fb">Lock in answer</button>`:`<div class="note">${already?'Your team’s answer is locked.':S.remaining<=0?'Time is up. Waiting for the host to reveal answers.':'Watch the screen!'}</div>`;
+      h+=sc>0&&!already&&S.remaining>0?`<div class="big">Write your answer</div><div class="countdown">${formatTime(S.remaining)}</div><canvas class="answer-pad" id="pad" aria-label="Handwriting area"></canvas><div class="row"><button id="clear-pad">Clear writing</button><button id="toggle-typing">Type instead</button></div><textarea id="fa" rows="2" placeholder="Typed answer (optional)" style="display:none;width:90%;font-size:20px"></textarea><button class="pri" id="fb">Lock in answer</button>`:`<div class="note">${already?'Your team’s answer is locked.':sc<=0?`You cannot participate in Final Jeopardy because your team’s balance is $${sc}; a positive balance is required.`:S.remaining<=0?'Time is up. Waiting for the host to reveal answers.':'Watch the screen!'}</div>`;
     }else h+=`<div class="note">${S.phase==='board'?'Pick is on the big screen':'Look at the big screen'}${S.control===me.id&&S.phase==='board'?' — <b>you have control!</b>':''}</div>`;
     app.innerHTML=h+'</div>';
     const bz=$('#bz');if(bz)bz.onpointerdown=()=>{emit('buzz',{id:me.id});try{navigator.vibrate&&navigator.vibrate(40)}catch(e){}};
@@ -369,7 +424,7 @@ if(isPlayer){
     room=r;
     r.on('_open',join);
     r.on('_status',()=>{if(!r.connected)S=null;if(me.name)draw()});
-    r.on('state',m=>{S=m.data;if(!hasName())return;if(!S.players[me.id])join();
+    r.on('state',m=>{S=m.data;if((S.removed||[]).includes(me.id)){removed=true;readyToJoin=false;draw();return}if(!hasName())return;if(readyToJoin&&!S.players[me.id])join();
       const a=document.activeElement;if(drawing||a&&(a.id==='wg'||a.id==='fa'))return;draw()});
     join();draw();
   });
@@ -379,15 +434,20 @@ if(isPlayer){
     if(e.target.closest('#switch-player')||e.target.closest('#choose-player')){choosingProfile=true;draw();return}
     if(e.target.closest('#cancel-player-switch')){choosingProfile=false;draw();return}
     if(e.target.closest('#new-player')){
-      me={id:newPlayerId(),name:'',mode:'solo',team:''};nameStrokes=[];answerStrokes=[];S=null;choosingProfile=false;
+      me={id:newPlayerId(),name:'',mode:'solo',team:'',color:'#ffffff',photo:''};nameStrokes=[];answerStrokes=[];S=null;choosingProfile=false;readyToJoin=false;removed=false;
+      updateReadyQuery(false);
       ls.set('jp_id',me.id);ls.set('jp_name','');ls.set('jp_mode','solo');ls.set('jp_team','');ls.set('jp_name_ink','[]');
       draw();return
     }
+    if(e.target.closest('#clear-photo')){me.photo='';saveProfile();previewPhoto();return}
+    const color=e.target.closest('[data-color]');
+    if(color){me.color=cleanColor(color.dataset.color);const picker=$('#pc');if(picker)picker.value=me.color;saveProfile();
+      app.querySelectorAll('[data-color]').forEach(button=>button.classList.toggle('selected',button===color));return}
     const selected=e.target.closest('[data-player-profile]');
     if(selected){
       const profile=profiles.find(p=>p.id===selected.dataset.playerProfile);if(!profile)return;
-      me={id:profile.id,name:String(profile.name||''),mode:profile.mode==='team'?'team':'solo',team:String(profile.team||'')};
-      nameStrokes=Array.isArray(profile.nameStrokes)?profile.nameStrokes:[];answerStrokes=[];S=null;choosingProfile=false;saveProfile();join();draw();
+      me={id:profile.id,name:String(profile.name||''),mode:profile.mode==='team'?'team':'solo',team:String(profile.team||''),color:cleanColor(profile.color),photo:cleanPhoto(profile.photo)};
+      nameStrokes=Array.isArray(profile.nameStrokes)?profile.nameStrokes:[];answerStrokes=[];S=null;choosingProfile=false;readyToJoin=false;removed=false;updateReadyQuery(false);saveProfile();draw();
     }
   });
 }
@@ -402,7 +462,7 @@ else{
   ['r1','r2'].forEach(r=>G[r].cats.forEach(c=>c.clues.forEach(q=>{if(String(q.media||'').startsWith('blob:'))q.media=''})));
   const save=()=>ls.set('jp_game',JSON.stringify(G));
   const CATS=()=>G['r'+(tab==='edit'?er:pr)].cats, MULT=()=>(tab==='edit'?er:pr)===2?2:1;
-  let tab='edit', er=1, pr=1, started=false, connectionError='', P={}, scores={}, finalWagers={}, finalAnswers={}, finalGroups=[], answerIndex=0, finalDeadline=0, finalTimeExpired=false, introIndex=0, votes={}, used=new Set(), cur=null, phase='board', open=false, buzzer=null, locked=[], control=null, ddW=0, maxW=0, stageKey='', ans=false, done={}, mediaEl=null;
+  let tab='edit', er=1, pr=1, started=false, connectionError='', P={}, scores={}, finalWagers={}, finalAnswers={}, finalGroups=[], answerIndex=0, finalDeadline=0, finalTimeExpired=false, introIndex=0, votes={}, used=new Set(), cur=null, phase='board', open=false, buzzer=null, locked=[], control=null, pickerGroup=null, removedPlayers=new Set(), ddW=0, maxW=0, stageKey='', ans=false, done={}, mediaEl=null;
   const k=()=>CATS()[cur.c].clues[cur.i], val=()=>(cur.i+1)*200*MULT(), pid=()=>Object.keys(P);
   const groupOf=id=>P[id]&&P[id].mode==='team'?'team:'+encodeURIComponent(String(P[id].team||'').trim().toLowerCase()):'solo:'+id;
   const groupIds=()=>[...new Set(pid().map(groupOf))];
@@ -411,6 +471,7 @@ else{
   const groupName=group=>group.startsWith('team:')?(P[membersOf(group)[0]]?.team||group.slice(5)):P[membersOf(group)[0]]?.name||'Player';
   const scoreOf=id=>scores[groupOf(id)]||0;
   const elig=()=>groupIds().filter(g=>(scores[g]||0)>0);
+  const randomGroup=()=>{const groups=groupIds();return groups.length?groups[Math.floor(Math.random()*groups.length)]:null};
   const MAX_PLAYERS=20;
   function drawJoinQr(canvas,text){
     const bytes=Array.from(new TextEncoder().encode(text));
@@ -513,6 +574,8 @@ else{
       remaining-=clean.length;if(clean.length>1)result.push(clean);return result;
     },[]);
   };
+  const cleanColor=value=>/^#[0-9a-f]{6}$/i.test(String(value||''))?String(value):'#ffffff';
+  const cleanPhoto=value=>typeof value==='string'&&value.length<=12000&&/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(value)?value:'';
   function voteResults(){
     const result={counts:{},ready:{}};
     groupIds().forEach(g=>{
@@ -526,7 +589,7 @@ else{
 
   function broadcast(){
     const pl={};pid().forEach(i=>pl[i]={n:P[i].name,s:scoreOf(i),mode:P[i].mode,team:P[i].team,group:groupOf(i),nameStrokes:P[i].nameStrokes});
-    emit('state',{phase,open,buzzer,locked,control,maxW,fcat:G.final.cat,players:pl,playerCount:pid().length,maxPlayers:MAX_PLAYERS,
+    emit('state',{phase,open,buzzer,locked,control,pickerGroup,pickerName:pickerGroup?groupName(pickerGroup):'',removed:[...removedPlayers],maxW,fcat:G.final.cat,players:pl,playerCount:pid().length,maxPlayers:MAX_PLAYERS,
       categories:phase==='board'?CATS().map(c=>c.name):[],cells:phase==='board'?boardCells():[],board:phase==='board'?boardItems():[],votes,
       voteResults:voteResults(),wagered:Object.keys(finalWagers),answered:Object.keys(finalAnswers),introIndex,
       remaining:phase==='fans'?Math.max(0,Math.ceil((finalDeadline-Date.now())/1000)):0});
@@ -557,9 +620,9 @@ else{
       const categories=CATS(),category=categories[introIndex];
       return `<div class="stage"><div class="m">ROUND ${pr}${pr===2?' · DOUBLE JEOPARDY':''} · CATEGORY ${introIndex+1} OF ${categories.length}</div><div class="category-reveal">${esc(category?.name||'')}</div></div>`;
     }
-    if(phase==='board'){const n=CATS().length;
+    if(phase==='board'){const n=CATS().length,teamPick=pickerGroup&&P[membersOf(pickerGroup)[0]]?.mode==='team',agreed=voteResults().ready[pickerGroup];
       return `<div class="note" style="text-align:center"><b>ROUND ${pr}</b>${pr===2?' · values doubled':''}</div><div class="board" style="grid-template-columns:repeat(${n},minmax(90px,1fr))">`+CATS().map(c=>`<div class="bc h">${esc(c.name)}</div>`).join('')+
-        [0,1,2,3,4].map(i=>CATS().map((c,ci)=>{const q=c.clues[i],ok=q&&(q.text||q.media)&&!used.has(ci+'-'+i);return `<button class="bc${ok?'':' used'}" data-c="${ci}" data-i="${i}" ${ok?'':'disabled'}>$${(i+1)*200*MULT()}</button>`}).join('')).join('')+`</div>`}
+        [0,1,2,3,4].map(i=>CATS().map((c,ci)=>{const q=c.clues[i],key=ci+'-'+i,ok=q&&(q.text||q.media)&&!used.has(key),selectable=ok&&teamPick&&agreed===key;return `<button class="bc${ok?'':' used'}${selectable?' on':''}" data-c="${ci}" data-i="${i}" ${selectable?'':'disabled'}>$${(i+1)*200*MULT()}</button>`}).join('')).join('')+`</div>`}
     if(phase==='ddwager')return `<div class="stage"><div class="t">Daily Double!</div><div class="m">${esc(CATS()[cur.c].name)}</div></div>`;
     if(phase==='fwager')return `<div class="stage"><div class="m">FINAL JEOPARDY</div><div class="t">${esc(G.final.cat||'—')}</div></div>`;
     if(phase==='fans')return `<div class="stage"><div class="t">${esc(G.final.clue)}</div></div>`;
@@ -582,7 +645,7 @@ else{
   const signature=strokes=>(strokes||[]).map(line=>line.length>1?`<polyline points="${line.map(pt=>`${pt[0]*100},${pt[1]*100}`).join(' ')}"/>`:'').join('');
   function roster(){
     const ids=pid();
-    return `<section id="roster"><b>Players (${ids.length}/${MAX_PLAYERS})</b><div class="name-roster">${ids.length?ids.map(i=>`<div class="pl">${P[i].nameStrokes?.length?`<svg viewBox="0 0 100 100" role="img" aria-label="Handwritten name">${signature(P[i].nameStrokes)}</svg>`:''}<span>${esc(P[i].name)}</span>${P[i].mode==='team'?`<div class="note">${esc(P[i].team)}</div>`:''}</div>`).join(''):'<span class="note">No players have joined yet.</span>'}</div></section>`;
+    return `<section id="roster"><b>Players (${ids.length}/${MAX_PLAYERS})</b><div class="name-roster">${ids.length?ids.map(i=>`<div class="pl">${P[i].nameStrokes?.length?`<svg viewBox="0 0 100 100" role="img" aria-label="Handwritten name">${signature(P[i].nameStrokes)}</svg>`:''}<span>${esc(P[i].name)}</span>${P[i].mode==='team'?`<div class="note">${esc(P[i].team)}</div>`:''}<button class="bad remove-player" data-remove-player="${esc(i)}" aria-label="Remove ${esc(P[i].name)}">Remove</button></div>`).join(''):'<span class="note">No players have joined yet.</span>'}</div></section>`;
   }
   function ctl(){
     const q=cur&&phase!=='board'&&phase!=='fwager'&&phase!=='fans'&&phase!=='freveal'&&phase!=='over'?k():null;
@@ -591,7 +654,7 @@ else{
       h=`<b>Round ${pr} category ${introIndex+1} of ${CATS().length}</b><button class="pri" id="next-category">${introIndex+1<CATS().length?'Reveal next category':'Show game board'}</button>`;
     }else if(phase==='board'){
       const vr=voteResults(),items=boardItems();
-      h=`<div class="note">Solo picks start a clue immediately. Team votes count only when all active members agree; the host selects the team-voted tile.</div>`+
+      h=`<div class="note"><b>Next pick:</b> ${pickerGroup?esc(groupName(pickerGroup)):'Waiting for a player'}${pickerGroup?' — only this player/team may choose.':''} Solo picks start a clue immediately. Team votes count only when all active members agree; the host selects their agreed tile.</div>`+
         items.map(q=>`<div class="row"><b>${esc(q.category)} · $${q.value}</b><span class="note">${vr.counts[q.key]||0} vote(s) · ${Object.entries(vr.ready).filter(([,v])=>v===q.key).map(([g])=>esc(groupName(g))).join(', ')}</span></div>`).join('')+
         `<label>Daily Double control: <select id="ctrl"><option value="">—</option>${pid().map(i=>`<option value="${i}"${control===i?' selected':''}>${who(i)}</option>`).join('')}</select></label>${pr===2?'<button class="pri" id="fin">Final Jeopardy →</button>':'<button class="pri" id="nr">Start Round 2 →</button>'}`;
     }
@@ -613,7 +676,22 @@ else{
     return h;
   }
   const elig0=()=>elig().filter(g=>finalWagers[g]!=null);
-  function scoreboard(){return groupIds().length?groupIds().map(g=>`<div class="pl${membersOf(g).includes(buzzer)?' hot':''}${membersOf(g).includes(control)?' ctrl':''}">${membersOf(g).map(i=>`<div class="score-name">${P[i].nameStrokes?.length?`<svg viewBox="0 0 100 100" role="img" aria-label="Handwritten name">${signature(P[i].nameStrokes)}</svg>`:''}<span>${esc(P[i].name)}</span></div>`).join('')}${g.startsWith('team:')?`<div class="note">${esc(groupName(g))}</div>`:''}<b>$${scores[g]||0}</b></div>`).join(''):`<div class="note">No players yet. Have players open the join page on their phones.</div>`}
+  function cardStyle(group){
+    const player=P[membersOf(group)[0]];if(!player)return '';
+    const color=cleanColor(player.color),photo=cleanPhoto(player.photo);
+    return color==='#ffffff'&&!photo?'':' custom" style="--player-color:'+color+';--player-photo:'+(photo?`url(${photo})`:'none')+'"';
+  }
+  function scoreboard(){
+    const groups=groupIds();if(!groups.length)return '<div class="note">No players yet. Have players open the join page on their phones.</div>';
+    groups.sort((a,b)=>(scores[b]||0)-(scores[a]||0));
+    const leaderScore=scores[groups[0]]||0,leaders=groups.filter(g=>(scores[g]||0)===leaderScore);
+    return groups.map(g=>{
+      const style=cardStyle(g),classes=`pl${membersOf(g).includes(buzzer)?' hot':''}${membersOf(g).includes(control)?' ctrl':''}${g===pickerGroup?' pick':''}${(scores[g]||0)===leaderScore?' leader':''}`;
+      const marker=g===pickerGroup?'<span class="badge">PICKS NEXT</span>':'';
+      const lead=(scores[g]||0)===leaderScore?`<span class="badge">${leaders.length>1?'TIED FOR LEAD':'IN THE LEAD'}</span>`:'';
+      return `<div class="${classes}${style}">${marker}${lead}${membersOf(g).map(i=>`<div class="score-name">${P[i].nameStrokes?.length?`<svg viewBox="0 0 100 100" role="img" aria-label="Handwritten name">${signature(P[i].nameStrokes)}</svg>`:''}<span>${esc(P[i].name)}</span></div>`).join('')}${g.startsWith('team:')?`<div class="note">${esc(groupName(g))}</div>`:''}<b>$${scores[g]||0}</b></div>`;
+    }).join('');
+  }
 
   function render(){
     const nb=`<header><h1>GhostHaus Christmas Jeopardy</h1>${started?`<button id="fs">⛶ Fullscreen</button><button id="qr-toggle" aria-expanded="false" aria-controls="qr-panel">▦ Join QR</button><span class="note">Round ${pr}</span><div class="join-qr card" id="qr-panel" hidden><div class="row"><b>Scan to join</b><button id="qr-close" aria-label="Close QR code">×</button></div><canvas id="qr-canvas" aria-label="QR code for the game join link"></canvas><a id="qr-link" target="_blank" rel="noopener">Open join page</a><div class="note">Room code: <b>${room.code}</b></div><div class="note" id="qr-status">Scan with a phone camera to join.</div></div>`:`<button id="tE" class="${tab==='edit'?'on':''}">✏️ Edit questions</button><button id="tP">▶ Start game</button><a href="${esc(joinPageUrl())}" target="_blank" rel="noopener">Open join page</a>`}
@@ -621,10 +699,11 @@ else{
     if(tab==='edit'){const f=document.activeElement;if(f&&f.dataset&&f.dataset.f&&document.body.contains(f)&&f.id!=='x'&&app.dataset.t==='edit'){const rosterEl=$('#roster');if(rosterEl)rosterEl.outerHTML=roster();return}
       app.dataset.t='edit';app.innerHTML=nb+`<main>${room?`<div class="card"><div class="row"><b>Separate join page:</b>${roomBases().map(base=>`<a href="${esc(base+'?join')}" target="_blank" rel="noopener">${esc(base)}</a>`).join(' ')}<span>Room code <b>${room.code}</b></span><button id="copyjoin">Copy direct join link</button></div></div>`:''}${editor()}${roster()}</main>`;return}
     app.dataset.t='play';
-    if(!$('#stg')){app.innerHTML=nb+`<main>${room?`<div class="row note"><span>Join link(s): ${roomBases().map(base=>`<a href="${esc(base+'?join='+encodeURIComponent(room.code))}" target="_blank" rel="noopener">${esc(base+'?join='+room.code)}</a>`).join(' · ')}. Teams share one score; clue votes count only when all connected members agree.${location.protocol==='file:'?' <b>This file is opened locally, so phones can’t load it. Host it on a website first (see README).</b>':''}</span><button id="copyjoin">Copy join link</button></div>`:`<div class="warn">Couldn’t start a room. ${esc(connectionError||'Check internet access to the PeerJS service, or use the LAN server.')} See the connection tips in README.</div>`}<div id="stg"></div><div class="ctl" id="ctl"></div><div class="score" id="sc"></div></main>`;stageKey=''}
+    if(!$('#stg')){app.innerHTML=nb+`<main>${room?`<div class="row note"><span>Join link(s): ${roomBases().map(base=>`<a href="${esc(base+'?join='+encodeURIComponent(room.code))}" target="_blank" rel="noopener">${esc(base+'?join='+room.code)}</a>`).join(' · ')}. Teams share one score; clue votes count only when all connected members agree.${location.protocol==='file:'?' <b>This file is opened locally, so phones can’t load it. Host it on a website first (see README).</b>':''}</span><button id="copyjoin">Copy join link</button></div>`:`<div class="warn">Couldn’t start a room. ${esc(connectionError||'Check internet access to the PeerJS service, or use the LAN server.')} See the connection tips in README.</div>`}<div id="stg"></div><div class="ctl" id="ctl"></div><div class="score" id="sc"></div><div id="roster"></div></main>`;stageKey=''}
     const key=phase+'|'+(cur?cur.c+'-'+cur.i:'')+'|'+used.size+'|'+pr+'|'+introIndex+'|'+answerIndex;
     if(key!==stageKey){stageKey=key;$('#stg').innerHTML=stage();mountMedia()}
     $('#ctl').innerHTML=ctl();$('#sc').innerHTML=scoreboard();
+    const rosterEl=$('#roster');if(rosterEl)rosterEl.outerHTML=roster();
     const count=$('#player-count');if(count)count.textContent=pid().length;
   }
   function renderFull(){app.dataset.t='';render()}
@@ -634,6 +713,20 @@ else{
   function startClue(c,i){cur={c,i};used.add(c+'-'+i);ans=false;open=false;buzzer=null;locked=[];votes={};
     if(k().dd){if(!control||!P[control])control=pid()[0]||null;phase='ddwager';maxW=control?Math.max(scoreOf(control),1000*MULT()):0;P[control]&&(ddW=0)}else phase='clue';
     push()}
+  function removePlayer(id){
+    if(!P[id])return;
+    const group=groupOf(id);
+    removedPlayers.add(id);delete P[id];delete votes[id];locked=locked.filter(playerId=>playerId!==id);
+    if(buzzer===id){buzzer=null;if(phase==='clue'&&!ans)open=true}
+    if(control===id)control=membersOf(group)[0]||pid()[0]||null;
+    if(!membersOf(group).length){
+      delete scores[group];delete finalWagers[group];delete finalAnswers[group];
+      const finalIndex=finalGroups.indexOf(group);
+      if(finalIndex>=0){finalGroups.splice(finalIndex,1);if(finalIndex<answerIndex)answerIndex--}
+      if(pickerGroup===group)pickerGroup=randomGroup();
+    }
+    push();
+  }
   function applyWager(id,a){
     if(phase==='ddwager'&&id===control){ddW=Math.max(5,Math.min(maxW,a|0));phase='dd';push()}
     else if(phase==='fwager'&&P[id]&&scoreOf(id)>0&&finalWagers[groupOf(id)]==null){const group=groupOf(id);finalWagers[group]=Math.max(0,Math.min(scoreOf(id),a|0));push()}
@@ -642,9 +735,10 @@ else{
   function bindRoom(nextRoom){
     room=nextRoom;
     onMsg(room,'join',d=>{const n=String(d.name||'').trim().slice(0,16),mode=d.mode==='team'?'team':'solo',team=mode==='team'?String(d.team||'').trim().slice(0,24):'',nameStrokes=cleanNameStrokes(d.nameStrokes);
-      if(!d.id||(!n&&!nameStrokes.length)||mode==='team'&&!team)return;
+      if(!d.id||removedPlayers.has(d.id)||(!n&&!nameStrokes.length)||mode==='team'&&!team)return;
       if(!P[d.id]&&pid().length>=MAX_PLAYERS)return;
-      P[d.id]={name:n||`Player ${pid().length+1}`,mode,team,lastSeen:Date.now(),nameStrokes};if(!control)control=d.id;
+      P[d.id]={name:n||`Player ${pid().length+1}`,mode,team,lastSeen:Date.now(),nameStrokes,color:cleanColor(d.color),photo:cleanPhoto(d.photo)};if(!control)control=d.id;
+      if(started&&!pickerGroup)pickerGroup=groupOf(d.id);
       scores[groupOf(d.id)]=scores[groupOf(d.id)]||0;push()});
     onMsg(room,'buzz',d=>{if(phase==='clue'&&open&&!buzzer&&P[d.id]&&!locked.includes(d.id)){buzzer=d.id;open=false;push()}});
     onMsg(room,'wager',d=>applyWager(d.id,parseInt(d.amount,10)||0));
@@ -655,7 +749,7 @@ else{
         remaining-=line.length;if(line.length)strokes.push(line)}
       finalAnswers[group]={text:String(d.text||'').slice(0,200),strokes};push()}});
     onMsg(room,'vote',d=>{const q=typeof d.key==='string'&&boardItems().find(item=>item.key===d.key);
-      if(phase!=='board'||!P[d.id]||!q)return;
+      if(phase!=='board'||!P[d.id]||groupOf(d.id)!==pickerGroup||!q)return;
       if(P[d.id].mode==='solo'){startClue(...d.key.split('-').map(Number));return}
       votes[d.id]=d.key;push()});
   }
@@ -678,7 +772,7 @@ else{
     if(!nextRoom){button.disabled=false;alert('Could not create a new game room. '+(connectionError||'Check your internet connection and try again.'));return}
     bindRoom(nextRoom);
     if(previousRoom)previousRoom.redirect(nextRoom.code);
-    started=true;tab='play';pr=1;used=new Set();phase='intro';introIndex=0;
+    started=true;tab='play';pr=1;used=new Set();phase='intro';introIndex=0;pickerGroup=randomGroup();
     document.body.classList.add('play');try{document.documentElement.requestFullscreen().catch(()=>{})}catch(e){}
     renderFull();broadcast();
   }
@@ -703,13 +797,17 @@ else{
     else if(id==='fs'){try{document.documentElement.requestFullscreen().catch(()=>{})}catch(e){}}
     else if(id==='r1'||id==='r2'){er=id==='r1'?1:2;app.dataset.t='';render()}
     else if(id==='next-category'){if(introIndex+1<CATS().length)introIndex++;else{phase='board';introIndex=0}push()}
-    else if(id==='nr'){pr=2;used=new Set();phase='intro';introIndex=0;cur=null;ans=false;votes={};const ids=pid();if(ids.length)control=ids.sort((a,b)=>scoreOf(a)-scoreOf(b))[0];push()}
+    else if(id==='nr'){pr=2;used=new Set();phase='intro';introIndex=0;cur=null;ans=false;votes={};if(!pickerGroup)pickerGroup=randomGroup();const ids=pid();if(ids.length)control=ids.sort((a,b)=>scoreOf(a)-scoreOf(b))[0];push()}
     else if(id==='addc'){CATS().push({name:'Category '+(CATS().length+1),clues:Array.from({length:5},blank)});save();app.dataset.t='';render()}
     else if(id==='rmc'&&CATS().length>1){CATS().pop();save();app.dataset.t='';render()}
-    else if(b.dataset.c!==undefined&&b.classList.contains('bc'))startClue(+b.dataset.c,+b.dataset.i);
+    else if(b.dataset.removePlayer){if(confirm(`Remove ${P[b.dataset.removePlayer]?.name||'this player'} from the game?`))removePlayer(b.dataset.removePlayer)}
+    else if(b.dataset.c!==undefined&&b.classList.contains('bc')){
+      const key=b.dataset.c+'-'+b.dataset.i;
+      if(pickerGroup&&P[membersOf(pickerGroup)[0]]?.mode==='team'&&voteResults().ready[pickerGroup]===key)startClue(+b.dataset.c,+b.dataset.i);
+    }
     else if(id==='openb'){open=true;push()} else if(id==='close'){open=false;push()}
     else if(id==='reveal'){reveal();push()}
-    else if(id==='right'){if(phase==='dd')scores[groupOf(control)]=(scores[groupOf(control)]||0)+ddW;else{scores[groupOf(buzzer)]=(scores[groupOf(buzzer)]||0)+val();control=buzzer}buzzer=null;reveal();push()}
+    else if(id==='right'){if(phase==='dd'){scores[groupOf(control)]=(scores[groupOf(control)]||0)+ddW;pickerGroup=groupOf(control)}else{scores[groupOf(buzzer)]=(scores[groupOf(buzzer)]||0)+val();control=buzzer;pickerGroup=groupOf(buzzer)}buzzer=null;reveal();push()}
     else if(id==='wrong'){if(phase==='dd'){scores[groupOf(control)]=(scores[groupOf(control)]||0)-ddW;reveal()}else{scores[groupOf(buzzer)]=(scores[groupOf(buzzer)]||0)-val();locked.push(buzzer);buzzer=null;
         if(locked.length>=pid().length)reveal();else open=true}push()}
     else if(id==='back'){phase='board';cur=null;ans=false;push()}
