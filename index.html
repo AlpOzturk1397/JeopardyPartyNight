@@ -45,6 +45,22 @@ main{padding:16px;max-width:1300px;margin:0 auto}
 .answer-pad{width:min(90vw,520px);height:180px;border:2px solid var(--line);border-radius:10px;background:#fff;touch-action:none}
 .vote-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;width:min(94vw,560px)}
 .vote-list button{min-height:48px}
+.mobile-board-scroll{width:min(96vw,900px);overflow-x:auto}
+.mobile-board{grid-template-columns:repeat(5,minmax(90px,1fr))}
+.mobile-board .bc{min-height:52px;padding:8px 4px;font-size:clamp(16px,4vw,24px)}
+.mobile-board .bc.h{min-height:58px;font-size:12px}
+.mobile-board .bc.used{visibility:visible;opacity:.35}
+.mobile-board .bc.on{background:var(--gold);color:#111}
+.name-pad{display:block;width:100%;height:130px;border:2px solid var(--line);border-radius:8px;background:#fff;touch-action:none}
+.name-roster{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 14px}
+.name-roster .pl{min-width:120px;max-width:220px}
+.name-roster svg{display:block;width:100%;height:34px;margin:2px auto}
+.name-roster svg polyline{fill:none;stroke:var(--fg);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.join-qr{position:fixed;z-index:20;top:76px;right:14px;width:190px;padding:12px;box-shadow:0 6px 24px #0004}
+.join-qr[hidden]{display:none}
+.join-qr canvas{display:block;width:144px;height:144px;margin:8px auto;background:#fff;image-rendering:pixelated}
+.join-qr a{display:block;overflow-wrap:anywhere;font-size:12px}
+.join-qr .row{justify-content:space-between}
 .answer-reveal{font:700 clamp(24px,4vw,48px) Georgia,serif;text-transform:uppercase;max-width:1000px;overflow-wrap:anywhere}
 .category-reveal{font:700 clamp(30px,6vw,72px) Georgia,serif;text-transform:uppercase;color:var(--gold)}
 .countdown{font:700 clamp(28px,5vw,56px) Georgia,serif;color:var(--gold)}
@@ -229,42 +245,62 @@ const formatTime=seconds=>`${Math.floor(seconds/60)}:${String(seconds%60).padSta
 
 /* ================= PHONE BUZZER ================= */
 if(isPlayer){
-  let S=null, me={
+  let S=null, nameStrokes=(()=>{try{const value=JSON.parse(ls.get('jp_name_ink')||'[]');return Array.isArray(value)?value:[]}catch(e){return []}})(), me={
     id:ls.get('jp_id')||('p'+Math.random().toString(36).slice(2,9)),
     name:ls.get('jp_name')||'',mode:ls.get('jp_mode')||'solo',team:ls.get('jp_team')||''
   }, answerStrokes=[], drawing=false;
   ls.set('jp_id',me.id);
-  const join=()=>{if(me.name)emit('join',{id:me.id,name:me.name,mode:me.mode,team:me.team})};
+  const hasName=()=>Boolean(me.name||nameStrokes.some(st=>st.length>1));
+  const join=()=>{if(hasName())emit('join',{id:me.id,name:me.name,mode:me.mode,team:me.team,nameStrokes})};
   const teamKey=p=>p&&p.mode==='team'?'team:'+encodeURIComponent(String(p.team||'').trim().toLowerCase()):'solo:'+p.id;
   const myGroup=()=>teamKey({id:me.id,mode:me.mode,team:me.team});
   const saveProfile=()=>{ls.set('jp_name',me.name);ls.set('jp_mode',me.mode);ls.set('jp_team',me.team)};
   const pickForm=(code='')=>`<div class="phone"><h1>GhostHaus Christmas Jeopardy</h1><div class="card">
     <h2>Join a game</h2><label>Room code<input id="jc" value="${esc(code)}" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="6-character code"></label>
-    <label>Your name<input id="nm" value="${esc(me.name)}" maxlength="16" autocomplete="name" placeholder="Your name"></label>
+    <label>Your name (type or write below)<input id="nm" value="${esc(me.name)}" maxlength="16" autocomplete="name" placeholder="Your name"></label>
+    <canvas class="name-pad" id="name-pad" aria-label="Write your name"></canvas><div class="row"><button id="clear-name">Clear writing</button></div>
     <label>Play style<select id="pm"><option value="solo"${me.mode==='solo'?' selected':''}>Solo player</option><option value="team"${me.mode==='team'?' selected':''}>Team member</option></select></label>
     <label id="team-label">Team name<input id="tn" value="${esc(me.team)}" maxlength="24" placeholder="Enter your team name"></label>
     <button class="pri" id="go" style="width:100%">Join game</button>
     <p class="note">Solo players can pick clues. Team members must agree on a clue before their team vote is counted.</p>
   </div></div>`;
+  const setupNamePad=()=>{
+    const pad=$('#name-pad');if(!pad)return;
+    const ctx=pad.getContext('2d'),rect=()=>pad.getBoundingClientRect();
+    const paint=()=>{const r=rect(),ratio=window.devicePixelRatio||1;pad.width=Math.round(r.width*ratio);pad.height=Math.round(r.height*ratio);ctx.setTransform(ratio,0,0,ratio,0,0);ctx.lineWidth=3;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#14172b';nameStrokes.forEach(st=>{if(st.length<2)return;ctx.beginPath();ctx.moveTo(st[0][0]*r.width,st[0][1]*r.height);st.slice(1).forEach(pt=>ctx.lineTo(pt[0]*r.width,pt[1]*r.height));ctx.stroke()})};
+    const point=e=>{const r=rect();return[Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*100)/100,Math.round(Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))*100)/100]};
+    paint();let drawing=false;
+    pad.onpointerdown=e=>{drawing=true;pad.setPointerCapture(e.pointerId);nameStrokes.push([point(e)]);paint()};
+    pad.onpointermove=e=>{if(!drawing)return;const st=nameStrokes[nameStrokes.length-1],pt=point(e);if(st.length<40)st.push(pt);paint()};
+    pad.onpointerup=pad.onpointercancel=()=>{drawing=false;ls.set('jp_name_ink',JSON.stringify(nameStrokes))};
+    const clear=$('#clear-name');if(clear)clear.onclick=()=>{nameStrokes=[];ls.set('jp_name_ink','[]');paint()};
+  };
+  const setupPickForm=(code,done)=>{
+    app.innerHTML=pickForm(code);const pm=$('#pm'),label=$('#team-label');label.hidden=pm.value!=='team';pm.onchange=()=>{label.hidden=pm.value!=='team'};
+    setupNamePad();
+    $('#go').onclick=()=>{me.name=$('#nm').value.trim();me.mode=$('#pm').value;me.team=$('#tn').value.trim();
+      if(!hasName()||me.mode==='team'&&!me.team){alert('Enter or write your name and, for team play, a team name.');return}
+      saveProfile();done()};
+  };
   const draw=()=>{
     if(!joinCode){app.innerHTML=pickForm();const pm=$('#pm'),label=$('#team-label');label.hidden=pm.value!=='team';pm.onchange=()=>{label.hidden=pm.value!=='team'};
+      setupNamePad();
       $('#go').onclick=()=>{const v=$('#jc').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');if(v.length!==6){alert('Enter the 6-character room code.');return}
         me.name=$('#nm').value.trim();me.mode=$('#pm').value;me.team=$('#tn').value.trim();
-        if(!me.name||me.mode==='team'&&!me.team){alert('Enter your name and, for team play, a team name.');return}
+        if(!hasName()||me.mode==='team'&&!me.team){alert('Enter or write your name and, for team play, a team name.');return}
         saveProfile();location.search='?join='+encodeURIComponent(v)};return}
-    if(!me.name){app.innerHTML=pickForm(joinCode.toUpperCase());const pm=$('#pm'),label=$('#team-label');label.hidden=pm.value!=='team';pm.onchange=()=>{label.hidden=pm.value!=='team'};
-      $('#go').onclick=()=>{me.name=$('#nm').value.trim();me.mode=$('#pm').value;me.team=$('#tn').value.trim();
-        if(!me.name||me.mode==='team'&&!me.team){alert('Enter your name and, for team play, a team name.');return}
-        saveProfile();join();draw()};return}
+    if(!hasName()){setupPickForm(joinCode.toUpperCase(),()=>{join();draw()});return}
     if(!room){app.innerHTML=`<div class="phone"><div class="big">Connecting…</div><p class="note">Connecting to the game service.</p></div>`;return}
     if(!S||!room.connected){
       const message=room.status==='unavailable'?'Host not found. Check the room code and make sure the host has started the game.':
         room.status==='retrying'?'Connection lost. Retrying… Check that the host is still running and that both devices can reach this network.':
         room.status==='error'?'Could not reach the connection service. On LAN, verify both devices use the host laptop’s printed address; over internet, check the network firewall and try another network.':
         room.connected?'Connected to host. Waiting for the game…':'Connecting to host…';
-      app.innerHTML=`<div class="phone"><div class="big">Hi ${esc(me.name)}!</div><p class="note">${message}</p>${room.lastError?`<details><summary>Connection details</summary><code>${esc(room.lastError)}</code></details>`:''}<button class="pri" id="retry">Retry connection</button></div>`;return
+      app.innerHTML=`<div class="phone"><div class="big">Hi ${esc(me.name||'Player')}!</div><p class="note">${message}</p>${S&&S.playerCount>=20&&!S.players[me.id]?'<p class="warn">This game is full (20 players maximum).</p>':''}${room.lastError?`<details><summary>Connection details</summary><code>${esc(room.lastError)}</code></details>`:''}<button class="pri" id="retry">Retry connection</button></div>`;return
     }
-    const p=S.players[me.id]; const sc=p?p.s:0; let h=`<div class="phone"><div class="note">${esc(me.name)}${me.mode==='team'?' · '+esc(me.team):' · Solo'}</div><div class="big">$${sc}</div>`;
+    const p=S.players[me.id];
+    if(!p&&S.playerCount>=S.maxPlayers){app.innerHTML=`<div class="phone"><div class="big">Game is full</div><p class="note">This game supports up to ${S.maxPlayers} players.</p></div>`;return}
+    const sc=p?p.s:0; let h=`<div class="phone"><div class="note">${esc(p?.n||me.name||'Player')}${me.mode==='team'?' · '+esc(me.team):' · Solo'}</div><div class="big">$${sc}</div>`;
     const wagerBox=(max,label)=>`<div>${label}</div><input id="wg" type="number" inputmode="numeric" min="0" max="${max}" placeholder="0–${max}" style="font-size:26px;text-align:center;width:180px"><button class="pri" id="wb">Lock in wager</button>`;
     if(S.phase==='clue'){
       const mine=S.buzzer===me.id, locked=S.locked.includes(me.id);
@@ -273,7 +309,7 @@ if(isPlayer){
     }else if(S.phase==='board'){
       const selected=S.votes&&S.votes[me.id];
       h+=`<div class="big">Choose the next clue</div><div class="note">${me.mode==='team'?'Team vote counts when every connected team member chooses the same clue.':'Your pick starts the clue; the host will open the buzzers.'}${selected?' Your current pick is highlighted.':''}</div>
-        <div class="vote-list">${(S.board||[]).map(q=>`<button data-vote="${q.key}" class="${selected===q.key?'on':''}">${esc(q.category)} · $${q.value}</button>`).join('')||'<span class="note">No clues remain on this board.</span>'}</div>`;
+      <div class="mobile-board-scroll"><div class="board mobile-board" style="grid-template-columns:repeat(${Math.max(1,(S.categories||[]).length)},minmax(90px,1fr));min-width:${Math.max(1,(S.categories||[]).length)*96}px">${(S.categories||[]).map(c=>`<div class="bc h">${esc(c)}</div>`).join('')}${(S.cells||[]).map(q=>`<button class="bc${q.available?'':' used'}${selected===q.key?' on':''}" data-vote="${q.key}" ${q.available?'':'disabled'}>${q.available?'$'+q.value:'—'}</button>`).join('')}</div></div>${!(S.board||[]).length?'<span class="note">No clues remain on this board.</span>':''}`;
     }else if(S.phase==='ddwager'){
       h+=S.control===me.id?`<div class="big">DAILY DOUBLE!</div>`+wagerBox(S.maxW,'Wager (min $5)'):`<div class="note">${esc(S.players[S.control]?.n||'A player')} is wagering on a Daily Double…</div>`;
     }else if(S.phase==='fwager'){
@@ -305,11 +341,11 @@ if(isPlayer){
     room=r;
     r.on('_open',join);
     r.on('_status',()=>{if(!r.connected)S=null;if(me.name)draw()});
-    r.on('state',m=>{S=m.data;if(!me.name)return;if(!S.players[me.id])join();
+    r.on('state',m=>{S=m.data;if(!hasName())return;if(!S.players[me.id])join();
       const a=document.activeElement;if(a&&(a.id==='wg'||a.id==='fa'))return;draw()});
     join();draw();
   });
-  if(me.name)setInterval(()=>{if(room&&room.connected)join()},30000);
+  if(hasName())setInterval(()=>{if(room&&room.connected)join()},30000);
   app.addEventListener('click',e=>{if(e.target.closest('#retry')){S=null;room.retry();draw()}});
 }
 
@@ -332,7 +368,108 @@ else{
   const groupName=group=>group.startsWith('team:')?(P[membersOf(group)[0]]?.team||group.slice(5)):P[membersOf(group)[0]]?.name||'Player';
   const scoreOf=id=>scores[groupOf(id)]||0;
   const elig=()=>groupIds().filter(g=>(scores[g]||0)>0);
+  const MAX_PLAYERS=20;
+  function drawJoinQr(canvas,text){
+    const bytes=Array.from(new TextEncoder().encode(text));
+    const versions=[{data:19,ecc:7},{data:34,ecc:10},{data:55,ecc:15},{data:80,ecc:20},{data:108,ecc:26}];
+    const version=versions.findIndex(v=>bytes.length<=v.data-2);
+    if(version<0)throw new Error('The join link is too long to encode.');
+    const spec=versions[version],versionNumber=version+1,bits=[];
+    const append=(value,count)=>{for(let i=count-1;i>=0;i--)bits.push((value>>>i)&1)};
+    append(4,4);append(bytes.length,8);bytes.forEach(byte=>append(byte,8));
+    const capacity=spec.data*8;
+    for(let i=0;i<Math.min(4,capacity-bits.length);i++)bits.push(0);
+    while(bits.length%8)bits.push(0);
+    const data=[];
+    for(let i=0;i<bits.length;i+=8)data.push(bits.slice(i,i+8).reduce((n,bit)=>(n<<1)|bit,0));
+    for(let pad=0;data.length<spec.data;pad++)data.push(pad%2?0x11:0xec);
+    const multiply=(a,b)=>{let product=0;while(b){if(b&1)product^=a;a<<=1;if(a&0x100)a^=0x11d;b>>=1}return product};
+    let generator=[1],root=1;
+    for(let i=0;i<spec.ecc;i++){
+      const next=Array(generator.length+1).fill(0);
+      generator.forEach((value,j)=>{next[j]^=value;next[j+1]^=multiply(value,root)});
+      generator=next;root=multiply(root,2);
+    }
+    const remainder=Array(spec.ecc).fill(0);
+    data.forEach(value=>{
+      const factor=value^remainder.shift();remainder.push(0);
+      remainder.forEach((_,i)=>{remainder[i]^=multiply(generator[i+1],factor)});
+    });
+    const codewords=data.concat(remainder),size=17+4*versionNumber;
+    const matrix=Array.from({length:size},()=>Array(size).fill(false));
+    const reserved=Array.from({length:size},()=>Array(size).fill(false));
+    const setFunction=(x,y,dark)=>{if(x>=0&&y>=0&&x<size&&y<size){matrix[y][x]=dark;reserved[y][x]=true}};
+    const finder=(left,top)=>{
+      for(let dy=-1;dy<=7;dy++)for(let dx=-1;dx<=7;dx++){
+        const x=left+dx,y=top+dy;
+        const dark=dx>=0&&dx<=6&&dy>=0&&dy<=6&&
+          (dx===0||dx===6||dy===0||dy===6||(dx>=2&&dx<=4&&dy>=2&&dy<=4));
+        setFunction(x,y,dark);
+      }
+    };
+    finder(0,0);finder(size-7,0);finder(0,size-7);
+    for(let i=8;i<size-8;i++){setFunction(6,i,i%2===0);setFunction(i,6,i%2===0)}
+    if(versionNumber>1){
+      const center=size-7;
+      if(!reserved[center][center])for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)
+        setFunction(center+dx,center+dy,Math.max(Math.abs(dx),Math.abs(dy))!==1);
+    }
+    for(let i=0;i<15;i++){
+      const x=i<6?8:i<8?8:i===8?7:14-i;
+      const y=i<6?i:i<8?i+1:i===8?8:8;
+      setFunction(x,y,false);
+      const rx=i<8?size-1-i:8,ry=i<8?8:size-15+i;
+      setFunction(rx,ry,false);
+    }
+    setFunction(8,size-8,true);
+    let bitIndex=0,upward=true;
+    for(let right=size-1;right>=1;right-=2){
+      if(right===6)right--;
+      for(let step=0;step<size;step++){
+        const y=upward?size-1-step:step;
+        for(let offset=0;offset<2;offset++){
+          const x=right-offset;if(reserved[y][x])continue;
+          let dark=bitIndex<codewords.length*8&&((codewords[bitIndex>>>3]>>>(7-(bitIndex&7)))&1)!==0;
+          bitIndex++;
+          if((x+y)%2===0)dark=!dark;
+          matrix[y][x]=dark;
+        }
+      }
+      upward=!upward;
+    }
+    const formatData=1<<3;
+    let formatRemainder=formatData<<10;
+    for(let i=14;i>=10;i--)if((formatRemainder>>>i)&1)formatRemainder^=0x537<<(i-10);
+    const formatBits=((formatData<<10)|formatRemainder)^0x5412;
+    for(let i=0;i<15;i++){
+      const dark=((formatBits>>>i)&1)!==0;
+      const x=i<6?8:i<8?8:i===8?7:14-i;
+      const y=i<6?i:i<8?i+1:i===8?8:8;
+      matrix[y][x]=dark;
+      const rx=i<8?size-1-i:8,ry=i<8?8:size-15+i;
+      matrix[ry][rx]=dark;
+    }
+    matrix[size-8][8]=true;
+    const context=canvas.getContext('2d'),width=180,quiet=4,moduleSize=Math.floor(width/(size+quiet*2));
+    canvas.width=canvas.height=width;
+    context.fillStyle='#fff';context.fillRect(0,0,width,width);context.fillStyle='#000';
+    const offset=Math.floor((width-moduleSize*(size+quiet*2))/2);
+    matrix.forEach((row,y)=>row.forEach((dark,x)=>{
+      if(dark)context.fillRect(offset+(x+quiet)*moduleSize,offset+(y+quiet)*moduleSize,moduleSize,moduleSize);
+    }));
+  }
   const boardItems=()=>CATS().flatMap((c,ci)=>c.clues.flatMap((q,i)=>q&&(q.text||q.media)&&!used.has(ci+'-'+i)?[{key:ci+'-'+i,category:c.name,value:(i+1)*200*MULT()}]:[]));
+  const boardCells=()=>[0,1,2,3,4].flatMap(i=>CATS().map((c,ci)=>({key:ci+'-'+i,value:(i+1)*200*MULT(),available:Boolean(c.clues[i]&&(c.clues[i].text||c.clues[i].media)&&!used.has(ci+'-'+i))})));
+  const cleanNameStrokes=strokes=>{
+    if(!Array.isArray(strokes))return [];
+    let remaining=40;
+    return strokes.slice(0,20).reduce((result,line)=>{
+      if(remaining<=0||!Array.isArray(line))return result;
+      const clean=line.slice(0,remaining).filter(pt=>Array.isArray(pt)&&pt.length>=2)
+        .map(pt=>[Math.max(0,Math.min(1,Number(pt[0])||0)),Math.max(0,Math.min(1,Number(pt[1])||0))]);
+      remaining-=clean.length;if(clean.length>1)result.push(clean);return result;
+    },[]);
+  };
   function voteResults(){
     const result={counts:{},ready:{}};
     groupIds().forEach(g=>{
@@ -345,8 +482,9 @@ else{
   }
 
   function broadcast(){
-    const pl={};pid().forEach(i=>pl[i]={n:P[i].name,s:scoreOf(i),mode:P[i].mode,team:P[i].team,group:groupOf(i)});
-    emit('state',{phase,open,buzzer,locked,control,maxW,fcat:G.final.cat,players:pl,board:phase==='board'?boardItems():[],votes,
+    const pl={};pid().forEach(i=>pl[i]={n:P[i].name,s:scoreOf(i),mode:P[i].mode,team:P[i].team,group:groupOf(i),nameStrokes:P[i].nameStrokes});
+    emit('state',{phase,open,buzzer,locked,control,maxW,fcat:G.final.cat,players:pl,playerCount:pid().length,maxPlayers:MAX_PLAYERS,
+      categories:phase==='board'?CATS().map(c=>c.name):[],cells:phase==='board'?boardCells():[],board:phase==='board'?boardItems():[],votes,
       voteResults:voteResults(),wagered:Object.keys(finalWagers),answered:Object.keys(finalAnswers),introIndex,
       remaining:phase==='fans'?Math.max(0,Math.ceil((finalDeadline-Date.now())/1000)):0});
   }
@@ -389,13 +527,18 @@ else{
     }
     if(phase==='over')return `<div class="stage"><div class="t">Game over</div></div>`;
     const q=k();
-    return `<div class="stage"><div class="m">${esc(CATS()[cur.c].name)} · $${val()}${q.dd?' · DAILY DOUBLE':''}</div>${q.text?`<div class="t">${esc(q.text)}</div>`:''}<div id="mslot"></div></div>`;
+    return `<div class="stage">${q.text?`<div class="t">${esc(q.text)}</div>`:''}<div id="mslot"></div></div>`;
   }
   function mountMedia(){
     const s=$('#mslot');if(!s||!cur)return;const q=k();if(q.type==='text'||!q.media)return;
     mediaEl=document.createElement(q.type==='audio'?'audio':'video');mediaEl.controls=true;mediaEl.src=q.media;mediaEl.autoplay=false;s.appendChild(mediaEl);
   }
   const who=i=>esc(P[i]?.name||'?');
+  const signature=strokes=>(strokes||[]).map(line=>line.length>1?`<polyline points="${line.map(pt=>`${pt[0]*100},${pt[1]*100}`).join(' ')}"/>`:'').join('');
+  function roster(){
+    const ids=pid();
+    return `<section id="roster"><b>Players (${ids.length}/${MAX_PLAYERS})</b><div class="name-roster">${ids.length?ids.map(i=>`<div class="pl">${P[i].nameStrokes?.length?`<svg viewBox="0 0 100 100" role="img" aria-label="Handwritten name">${signature(P[i].nameStrokes)}</svg>`:''}<span>${esc(P[i].name)}</span>${P[i].mode==='team'?`<div class="note">${esc(P[i].team)}</div>`:''}</div>`).join(''):'<span class="note">No players have joined yet.</span>'}</div></section>`;
+  }
   function ctl(){
     const q=cur&&phase!=='board'&&phase!=='fwager'&&phase!=='fans'&&phase!=='freveal'&&phase!=='over'?k():null;
     let h='';
@@ -425,19 +568,20 @@ else{
     return h;
   }
   const elig0=()=>elig().filter(g=>finalWagers[g]!=null);
-  function scoreboard(){return groupIds().length?groupIds().map(g=>`<div class="pl${membersOf(g).includes(buzzer)?' hot':''}${membersOf(g).includes(control)?' ctrl':''}"><div class="note">${esc(groupName(g))}${g.startsWith('team:')?' · '+membersOf(g).length+' member(s)':''}</div><b>$${scores[g]||0}</b></div>`).join(''):`<div class="note">No players yet. Have players open the join page on their phones.</div>`}
+  function scoreboard(){return groupIds().length?groupIds().map(g=>`<div class="pl${membersOf(g).includes(buzzer)?' hot':''}${membersOf(g).includes(control)?' ctrl':''}"><div class="note">${esc(groupName(g))}</div><b>$${scores[g]||0}</b></div>`).join(''):`<div class="note">No players yet. Have players open the join page on their phones.</div>`}
 
   function render(){
-    const nb=`<header><h1>GhostHaus Christmas Jeopardy</h1>${started?`<button id="fs">⛶ Fullscreen</button><span class="note">Round ${pr}</span>`:`<button id="tE" class="${tab==='edit'?'on':''}">✏️ Edit questions</button><button id="tP">▶ Start game</button><a href="${esc(joinPageUrl())}" target="_blank" rel="noopener">Open join page</a>`}
+    const nb=`<header><h1>GhostHaus Christmas Jeopardy</h1>${started?`<button id="fs">⛶ Fullscreen</button><button id="qr-toggle" aria-expanded="false" aria-controls="qr-panel">▦ Join QR</button><span class="note">Round ${pr}</span><div class="join-qr card" id="qr-panel" hidden><div class="row"><b>Scan to join</b><button id="qr-close" aria-label="Close QR code">×</button></div><canvas id="qr-canvas" aria-label="QR code for the game join link"></canvas><a id="qr-link" target="_blank" rel="noopener">Open join page</a><div class="note">Room code: <b>${room.code}</b></div><div class="note" id="qr-status">Scan with a phone camera to join.</div></div>`:`<button id="tE" class="${tab==='edit'?'on':''}">✏️ Edit questions</button><button id="tP">▶ Start game</button><a href="${esc(joinPageUrl())}" target="_blank" rel="noopener">Open join page</a>`}
       <span class="note">${room?'● room <b>'+room.code+'</b> · <span id="player-count">'+pid().length+'</span> player(s)':'○ not connected'}</span></header>`;
-    if(tab==='edit'){const f=document.activeElement;if(f&&f.dataset&&f.dataset.f&&document.body.contains(f)&&f.id!=='x'&&app.dataset.t==='edit'){return}
-      app.dataset.t='edit';app.innerHTML=nb+`<main>${room?`<div class="card"><div class="row"><b>Separate join page:</b>${roomBases().map(base=>`<a href="${esc(base+'?join')}" target="_blank" rel="noopener">${esc(base)}</a>`).join(' ')}<span>Room code <b>${room.code}</b></span><button id="copyjoin">Copy direct join link</button></div></div>`:''}${editor()}</main>`;return}
+    if(tab==='edit'){const f=document.activeElement;if(f&&f.dataset&&f.dataset.f&&document.body.contains(f)&&f.id!=='x'&&app.dataset.t==='edit'){const rosterEl=$('#roster');if(rosterEl)rosterEl.outerHTML=roster();return}
+      app.dataset.t='edit';app.innerHTML=nb+`<main>${room?`<div class="card"><div class="row"><b>Separate join page:</b>${roomBases().map(base=>`<a href="${esc(base+'?join')}" target="_blank" rel="noopener">${esc(base)}</a>`).join(' ')}<span>Room code <b>${room.code}</b></span><button id="copyjoin">Copy direct join link</button></div></div>`:''}${editor()}${roster()}</main>`;return}
     app.dataset.t='play';
-    if(!$('#stg')){app.innerHTML=nb+`<main>${room?`<div class="row note"><span>Join link(s): ${roomBases().map(base=>`<a href="${esc(base+'?join='+encodeURIComponent(room.code))}" target="_blank" rel="noopener">${esc(base+'?join='+room.code)}</a>`).join(' · ')}. Teams share a score; team clue votes count only when all connected members agree.${location.protocol==='file:'?' <b>This file is opened locally, so phones can’t load it. Host it on a website first (see README).</b>':''}</span><button id="copyjoin">Copy join link</button></div>`:`<div class="warn">Couldn’t start a room. ${esc(connectionError||'Check internet access to the PeerJS service, or use the LAN server.')} See the connection tips in README.</div>`}<div id="stg"></div><div class="ctl" id="ctl"></div><div class="score" id="sc"></div></main>`;stageKey=''}
+    if(!$('#stg')){app.innerHTML=nb+`<main>${room?`<div class="row note"><span>Join link(s): ${roomBases().map(base=>`<a href="${esc(base+'?join='+encodeURIComponent(room.code))}" target="_blank" rel="noopener">${esc(base+'?join='+room.code)}</a>`).join(' · ')}. Teams share one score; clue votes count only when all connected members agree.${location.protocol==='file:'?' <b>This file is opened locally, so phones can’t load it. Host it on a website first (see README).</b>':''}</span><button id="copyjoin">Copy join link</button></div>`:`<div class="warn">Couldn’t start a room. ${esc(connectionError||'Check internet access to the PeerJS service, or use the LAN server.')} See the connection tips in README.</div>`}<div id="stg"></div><div class="ctl" id="ctl"></div><div class="score" id="sc"></div>${roster()}</main>`;stageKey=''}
     const key=phase+'|'+(cur?cur.c+'-'+cur.i:'')+'|'+used.size+'|'+pr+'|'+introIndex+'|'+answerIndex;
     if(key!==stageKey){stageKey=key;$('#stg').innerHTML=stage();mountMedia()}
     $('#ctl').innerHTML=ctl();$('#sc').innerHTML=scoreboard();
     const count=$('#player-count');if(count)count.textContent=pid().length;
+    const rosterEl=$('#roster');if(rosterEl)rosterEl.outerHTML=roster();
   }
   function renderFull(){app.dataset.t='';render()}
 
@@ -453,9 +597,10 @@ else{
   function onMsg(source,t,fn){source.on(t,m=>{if(m.data&&typeof m.data==='object')fn(m.data)})}
   function bindRoom(nextRoom){
     room=nextRoom;
-    onMsg(room,'join',d=>{const n=String(d.name||'').trim().slice(0,16),mode=d.mode==='team'?'team':'solo',team=mode==='team'?String(d.team||'').trim().slice(0,24):'';
-      if(!d.id||!n||mode==='team'&&!team)return;
-      P[d.id]={name:n,mode,team,lastSeen:Date.now()};if(!control)control=d.id;
+    onMsg(room,'join',d=>{const n=String(d.name||'').trim().slice(0,16),mode=d.mode==='team'?'team':'solo',team=mode==='team'?String(d.team||'').trim().slice(0,24):'',nameStrokes=cleanNameStrokes(d.nameStrokes);
+      if(!d.id||(!n&&!nameStrokes.length)||mode==='team'&&!team)return;
+      if(!P[d.id]&&pid().length>=MAX_PLAYERS)return;
+      P[d.id]={name:n||`Player ${pid().length+1}`,mode,team,lastSeen:Date.now(),nameStrokes};if(!control)control=d.id;
       scores[groupOf(d.id)]=scores[groupOf(d.id)]||0;push()});
     onMsg(room,'buzz',d=>{if(phase==='clue'&&open&&!buzzer&&P[d.id]&&!locked.includes(d.id)){buzzer=d.id;open=false;push()}});
     onMsg(room,'wager',d=>applyWager(d.id,parseInt(d.amount,10)||0));
@@ -497,6 +642,18 @@ else{
   app.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b)return;const id=b.id;
     if(id==='tE'&&!started){tab='edit';app.dataset.t='';render()} else if(id==='tP'||id==='toplay')startGame(b);
+    else if(id==='qr-toggle'){
+      const panel=$('#qr-panel'),button=$('#qr-toggle');
+      panel.hidden=!panel.hidden;button.setAttribute('aria-expanded',String(!panel.hidden));
+      if(!panel.hidden&&!panel.dataset.code){
+        const url=joinUrl(room.code),canvas=$('#qr-canvas'),status=$('#qr-status'),link=$('#qr-link');
+        link.href=url;
+        try{drawJoinQr(canvas,url);panel.dataset.code=room.code}
+        catch(error){console.error('Could not generate the join QR code',error);status.textContent='QR unavailable. Share the link or room code instead.'}
+      }
+    }else if(id==='qr-close'){
+      $('#qr-panel').hidden=true;$('#qr-toggle').setAttribute('aria-expanded','false');
+    }
     else if(id==='copyjoin'){const url=joinUrl(room.code);if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(()=>{b.textContent='Copied!'}).catch(e=>{console.error('Could not copy join link',e);prompt('Copy this join link:',url)});else prompt('Copy this join link:',url)}
     else if(id==='joinpage')window.open(joinPageUrl(),'_blank','noopener');
     else if(id==='fs'){try{document.documentElement.requestFullscreen().catch(()=>{})}catch(e){}}
