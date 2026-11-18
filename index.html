@@ -34,12 +34,17 @@ main{padding:16px;max-width:1300px;margin:0 auto}
 .stage{background:var(--blue);color:#fff;border-radius:12px;padding:28px;text-align:center;min-height:260px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
 .stage .t{font:700 clamp(22px,4vw,46px) Georgia,serif;text-transform:uppercase;max-width:900px}
 .stage .m{color:var(--gold);font-weight:700;letter-spacing:1px}
-.stage video{max-width:100%;max-height:50vh;border-radius:8px}
+.stage video{max-width:100%;max-height:50vh;border-radius:8px;transform:scale(1)}
+.stage video.zooming{animation:clue-video-zoom 25s ease-in forwards}
+@keyframes clue-video-zoom{to{transform:scale(1.15)}}
 .ctl{margin:14px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .score{display:flex;gap:10px;flex-wrap:wrap}
 .pl{background:var(--card);border:2px solid var(--line);border-radius:10px;padding:8px 14px;min-width:120px;text-align:center}
 .pl.hot{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold)}.pl.ctrl{border-color:var(--ok)}
 .pl b{display:block;font-size:22px}
+.score-name{min-width:100px}
+.score-name svg{display:block;width:100%;height:34px;margin:2px auto}
+.score-name svg polyline{fill:none;stroke:var(--fg);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
 .phone{min-height:100vh;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;padding:20px;text-align:center}
 .phone .card{width:min(100%,520px);text-align:left}
 .answer-pad{width:min(90vw,520px);height:180px;border:2px solid var(--line);border-radius:10px;background:#fff;touch-action:none}
@@ -342,7 +347,7 @@ if(isPlayer){
     r.on('_open',join);
     r.on('_status',()=>{if(!r.connected)S=null;if(me.name)draw()});
     r.on('state',m=>{S=m.data;if(!hasName())return;if(!S.players[me.id])join();
-      const a=document.activeElement;if(a&&(a.id==='wg'||a.id==='fa'))return;draw()});
+      const a=document.activeElement;if(drawing||a&&(a.id==='wg'||a.id==='fa'))return;draw()});
     join();draw();
   });
   if(hasName())setInterval(()=>{if(room&&room.connected)join()},30000);
@@ -519,7 +524,7 @@ else{
         [0,1,2,3,4].map(i=>CATS().map((c,ci)=>{const q=c.clues[i],ok=q&&(q.text||q.media)&&!used.has(ci+'-'+i);return `<button class="bc${ok?'':' used'}" data-c="${ci}" data-i="${i}" ${ok?'':'disabled'}>$${(i+1)*200*MULT()}</button>`}).join('')).join('')+`</div>`}
     if(phase==='ddwager')return `<div class="stage"><div class="t">Daily Double!</div><div class="m">${esc(CATS()[cur.c].name)}</div></div>`;
     if(phase==='fwager')return `<div class="stage"><div class="m">FINAL JEOPARDY</div><div class="t">${esc(G.final.cat||'—')}</div></div>`;
-    if(phase==='fans')return `<div class="stage"><div class="m">FINAL JEOPARDY · ${esc(G.final.cat)}</div><div class="t">${esc(G.final.clue)}</div><div class="countdown" id="final-countdown">${formatTime(Math.max(0,Math.ceil((finalDeadline-Date.now())/1000)))}</div></div>`;
+    if(phase==='fans')return `<div class="stage"><div class="t">${esc(G.final.clue)}</div></div>`;
     if(phase==='freveal'){
       const group=finalGroups[answerIndex],entry=group?finalAnswers[group]:null;
       if(!group)return `<div class="stage"><div class="m">ALL FINAL JEOPARDY ANSWERS REVEALED</div><div class="t">${esc(G.final.ans||'')}</div></div>`;
@@ -531,7 +536,9 @@ else{
   }
   function mountMedia(){
     const s=$('#mslot');if(!s||!cur)return;const q=k();if(q.type==='text'||!q.media)return;
-    mediaEl=document.createElement(q.type==='audio'?'audio':'video');mediaEl.controls=true;mediaEl.src=q.media;mediaEl.autoplay=false;s.appendChild(mediaEl);
+    mediaEl=document.createElement(q.type==='audio'?'audio':'video');mediaEl.controls=true;mediaEl.src=q.media;mediaEl.autoplay=false;
+    if(q.type==='video'){const video=mediaEl;video.addEventListener('play',()=>video.classList.add('zooming'));video.addEventListener('ended',()=>video.classList.remove('zooming'))}
+    s.appendChild(mediaEl);
   }
   const who=i=>esc(P[i]?.name||'?');
   const signature=strokes=>(strokes||[]).map(line=>line.length>1?`<polyline points="${line.map(pt=>`${pt[0]*100},${pt[1]*100}`).join(' ')}"/>`:'').join('');
@@ -568,7 +575,7 @@ else{
     return h;
   }
   const elig0=()=>elig().filter(g=>finalWagers[g]!=null);
-  function scoreboard(){return groupIds().length?groupIds().map(g=>`<div class="pl${membersOf(g).includes(buzzer)?' hot':''}${membersOf(g).includes(control)?' ctrl':''}"><div class="note">${esc(groupName(g))}</div><b>$${scores[g]||0}</b></div>`).join(''):`<div class="note">No players yet. Have players open the join page on their phones.</div>`}
+  function scoreboard(){return groupIds().length?groupIds().map(g=>`<div class="pl${membersOf(g).includes(buzzer)?' hot':''}${membersOf(g).includes(control)?' ctrl':''}">${membersOf(g).map(i=>`<div class="score-name">${P[i].nameStrokes?.length?`<svg viewBox="0 0 100 100" role="img" aria-label="Handwritten name">${signature(P[i].nameStrokes)}</svg>`:''}<span>${esc(P[i].name)}</span></div>`).join('')}${g.startsWith('team:')?`<div class="note">${esc(groupName(g))}</div>`:''}<b>$${scores[g]||0}</b></div>`).join(''):`<div class="note">No players yet. Have players open the join page on their phones.</div>`}
 
   function render(){
     const nb=`<header><h1>GhostHaus Christmas Jeopardy</h1>${started?`<button id="fs">⛶ Fullscreen</button><button id="qr-toggle" aria-expanded="false" aria-controls="qr-panel">▦ Join QR</button><span class="note">Round ${pr}</span><div class="join-qr card" id="qr-panel" hidden><div class="row"><b>Scan to join</b><button id="qr-close" aria-label="Close QR code">×</button></div><canvas id="qr-canvas" aria-label="QR code for the game join link"></canvas><a id="qr-link" target="_blank" rel="noopener">Open join page</a><div class="note">Room code: <b>${room.code}</b></div><div class="note" id="qr-status">Scan with a phone camera to join.</div></div>`:`<button id="tE" class="${tab==='edit'?'on':''}">✏️ Edit questions</button><button id="tP">▶ Start game</button><a href="${esc(joinPageUrl())}" target="_blank" rel="noopener">Open join page</a>`}
@@ -576,12 +583,11 @@ else{
     if(tab==='edit'){const f=document.activeElement;if(f&&f.dataset&&f.dataset.f&&document.body.contains(f)&&f.id!=='x'&&app.dataset.t==='edit'){const rosterEl=$('#roster');if(rosterEl)rosterEl.outerHTML=roster();return}
       app.dataset.t='edit';app.innerHTML=nb+`<main>${room?`<div class="card"><div class="row"><b>Separate join page:</b>${roomBases().map(base=>`<a href="${esc(base+'?join')}" target="_blank" rel="noopener">${esc(base)}</a>`).join(' ')}<span>Room code <b>${room.code}</b></span><button id="copyjoin">Copy direct join link</button></div></div>`:''}${editor()}${roster()}</main>`;return}
     app.dataset.t='play';
-    if(!$('#stg')){app.innerHTML=nb+`<main>${room?`<div class="row note"><span>Join link(s): ${roomBases().map(base=>`<a href="${esc(base+'?join='+encodeURIComponent(room.code))}" target="_blank" rel="noopener">${esc(base+'?join='+room.code)}</a>`).join(' · ')}. Teams share one score; clue votes count only when all connected members agree.${location.protocol==='file:'?' <b>This file is opened locally, so phones can’t load it. Host it on a website first (see README).</b>':''}</span><button id="copyjoin">Copy join link</button></div>`:`<div class="warn">Couldn’t start a room. ${esc(connectionError||'Check internet access to the PeerJS service, or use the LAN server.')} See the connection tips in README.</div>`}<div id="stg"></div><div class="ctl" id="ctl"></div><div class="score" id="sc"></div>${roster()}</main>`;stageKey=''}
+    if(!$('#stg')){app.innerHTML=nb+`<main>${room?`<div class="row note"><span>Join link(s): ${roomBases().map(base=>`<a href="${esc(base+'?join='+encodeURIComponent(room.code))}" target="_blank" rel="noopener">${esc(base+'?join='+room.code)}</a>`).join(' · ')}. Teams share one score; clue votes count only when all connected members agree.${location.protocol==='file:'?' <b>This file is opened locally, so phones can’t load it. Host it on a website first (see README).</b>':''}</span><button id="copyjoin">Copy join link</button></div>`:`<div class="warn">Couldn’t start a room. ${esc(connectionError||'Check internet access to the PeerJS service, or use the LAN server.')} See the connection tips in README.</div>`}<div id="stg"></div><div class="ctl" id="ctl"></div><div class="score" id="sc"></div></main>`;stageKey=''}
     const key=phase+'|'+(cur?cur.c+'-'+cur.i:'')+'|'+used.size+'|'+pr+'|'+introIndex+'|'+answerIndex;
     if(key!==stageKey){stageKey=key;$('#stg').innerHTML=stage();mountMedia()}
     $('#ctl').innerHTML=ctl();$('#sc').innerHTML=scoreboard();
     const count=$('#player-count');if(count)count.textContent=pid().length;
-    const rosterEl=$('#roster');if(rosterEl)rosterEl.outerHTML=roster();
   }
   function renderFull(){app.dataset.t='';render()}
 
