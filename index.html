@@ -250,22 +250,44 @@ const formatTime=seconds=>`${Math.floor(seconds/60)}:${String(seconds%60).padSta
 
 /* ================= PHONE BUZZER ================= */
 if(isPlayer){
-  let S=null, nameStrokes=(()=>{try{const value=JSON.parse(ls.get('jp_name_ink')||'[]');return Array.isArray(value)?value:[]}catch(e){return []}})(), me={
-    id:ls.get('jp_id')||('p'+Math.random().toString(36).slice(2,9)),
-    name:ls.get('jp_name')||'',mode:ls.get('jp_mode')||'solo',team:ls.get('jp_team')||''
-  }, answerStrokes=[], drawing=false;
+  const newPlayerId=()=>`p${Math.random().toString(36).slice(2,9)}`;
+  const savedProfiles=(()=>{try{const value=JSON.parse(ls.get('jp_profiles')||'[]');return Array.isArray(value)?value.filter(p=>p&&typeof p.id==='string'&&p.id):[]}catch(e){return []}})();
+  const storedId=ls.get('jp_id'), legacyId=storedId||newPlayerId();
+  const legacyStrokes=(()=>{try{const value=JSON.parse(ls.get('jp_name_ink')||'[]');return Array.isArray(value)?value:[]}catch(e){return []}})();
+  const currentProfile=savedProfiles.find(p=>p.id===legacyId);
+  let profiles=savedProfiles, S=null, me={
+    id:legacyId,
+    name:currentProfile?String(currentProfile.name||''):ls.get('jp_name')||'',
+    mode:currentProfile&&currentProfile.mode==='team'||!currentProfile&&ls.get('jp_mode')==='team'?'team':'solo',
+    team:currentProfile?String(currentProfile.team||''):ls.get('jp_team')||''
+  }, nameStrokes=Array.isArray(currentProfile&&currentProfile.nameStrokes)?currentProfile.nameStrokes:legacyStrokes,
+    answerStrokes=[], drawing=false, choosingProfile=false;
+  if(!currentProfile&&storedId){profiles.push({id:me.id,name:me.name,mode:me.mode,team:me.team,nameStrokes});ls.set('jp_profiles',JSON.stringify(profiles))}
   ls.set('jp_id',me.id);
   const hasName=()=>Boolean(me.name||nameStrokes.some(st=>st.length>1));
   const join=()=>{if(hasName())emit('join',{id:me.id,name:me.name,mode:me.mode,team:me.team,nameStrokes})};
   const teamKey=p=>p&&p.mode==='team'?'team:'+encodeURIComponent(String(p.team||'').trim().toLowerCase()):'solo:'+p.id;
   const myGroup=()=>teamKey({id:me.id,mode:me.mode,team:me.team});
-  const saveProfile=()=>{ls.set('jp_name',me.name);ls.set('jp_mode',me.mode);ls.set('jp_team',me.team)};
+  const saveProfile=()=>{
+    const profile={id:me.id,name:me.name,mode:me.mode,team:me.team,nameStrokes};
+    const index=profiles.findIndex(p=>p.id===me.id);
+    if(index<0)profiles.push(profile);else profiles[index]=profile;
+    ls.set('jp_profiles',JSON.stringify(profiles));ls.set('jp_id',me.id);
+    ls.set('jp_name',me.name);ls.set('jp_mode',me.mode);ls.set('jp_team',me.team);ls.set('jp_name_ink',JSON.stringify(nameStrokes));
+  };
+  const profilePicker=()=>`<div class="phone"><h1>GhostHaus Christmas Jeopardy</h1><div class="card">
+    <h2>Choose a player</h2>${profiles.map(p=>`<button data-player-profile="${esc(p.id)}" style="width:100%;margin:4px 0">${esc(p.name||'Handwritten player')}${p.mode==='team'?' · '+esc(p.team||'Team'):''}</button>`).join('')}
+    <button class="pri" id="new-player" style="width:100%;margin-top:8px">Join as a new player</button>
+    <button id="cancel-player-switch" style="width:100%;margin-top:8px">Cancel</button>
+    <p class="note">Saved players on this device keep their existing game identity and score.</p>
+  </div></div>`;
   const pickForm=(code='')=>`<div class="phone"><h1>GhostHaus Christmas Jeopardy</h1><div class="card">
     <h2>Join a game</h2><label>Room code<input id="jc" value="${esc(code)}" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="6-character code"></label>
     <label>Your name (type or write below)<input id="nm" value="${esc(me.name)}" maxlength="16" autocomplete="name" placeholder="Your name"></label>
     <canvas class="name-pad" id="name-pad" aria-label="Write your name"></canvas><div class="row"><button id="clear-name">Clear writing</button></div>
     <label>Play style<select id="pm"><option value="solo"${me.mode==='solo'?' selected':''}>Solo player</option><option value="team"${me.mode==='team'?' selected':''}>Team member</option></select></label>
     <label id="team-label">Team name<input id="tn" value="${esc(me.team)}" maxlength="24" placeholder="Enter your team name"></label>
+    ${profiles.length?'<button id="choose-player" style="width:100%;margin-bottom:8px">Choose a saved player</button>':''}
     <button class="pri" id="go" style="width:100%">Join game</button>
     <p class="note">Solo players can pick clues. Team members must agree on a clue before their team vote is counted.</p>
   </div></div>`;
@@ -277,8 +299,8 @@ if(isPlayer){
     paint();let drawing=false;
     pad.onpointerdown=e=>{drawing=true;pad.setPointerCapture(e.pointerId);nameStrokes.push([point(e)]);paint()};
     pad.onpointermove=e=>{if(!drawing)return;const st=nameStrokes[nameStrokes.length-1],pt=point(e);if(st.length<40)st.push(pt);paint()};
-    pad.onpointerup=pad.onpointercancel=()=>{drawing=false;ls.set('jp_name_ink',JSON.stringify(nameStrokes))};
-    const clear=$('#clear-name');if(clear)clear.onclick=()=>{nameStrokes=[];ls.set('jp_name_ink','[]');paint()};
+    pad.onpointerup=pad.onpointercancel=()=>{drawing=false;saveProfile()};
+    const clear=$('#clear-name');if(clear)clear.onclick=()=>{nameStrokes=[];saveProfile();paint()};
   };
   const setupPickForm=(code,done)=>{
     app.innerHTML=pickForm(code);const pm=$('#pm'),label=$('#team-label');label.hidden=pm.value!=='team';pm.onchange=()=>{label.hidden=pm.value!=='team'};
@@ -288,6 +310,7 @@ if(isPlayer){
       saveProfile();done()};
   };
   const draw=()=>{
+    if(choosingProfile){app.innerHTML=profilePicker();return}
     if(!joinCode){app.innerHTML=pickForm();const pm=$('#pm'),label=$('#team-label');label.hidden=pm.value!=='team';pm.onchange=()=>{label.hidden=pm.value!=='team'};
       setupNamePad();
       $('#go').onclick=()=>{const v=$('#jc').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');if(v.length!==6){alert('Enter the 6-character room code.');return}
@@ -301,11 +324,11 @@ if(isPlayer){
         room.status==='retrying'?'Connection lost. Retrying… Check that the host is still running and that both devices can reach this network.':
         room.status==='error'?'Could not reach the connection service. On LAN, verify both devices use the host laptop’s printed address; over internet, check the network firewall and try another network.':
         room.connected?'Connected to host. Waiting for the game…':'Connecting to host…';
-      app.innerHTML=`<div class="phone"><div class="big">Hi ${esc(me.name||'Player')}!</div><p class="note">${message}</p>${S&&S.playerCount>=20&&!S.players[me.id]?'<p class="warn">This game is full (20 players maximum).</p>':''}${room.lastError?`<details><summary>Connection details</summary><code>${esc(room.lastError)}</code></details>`:''}<button class="pri" id="retry">Retry connection</button></div>`;return
+      app.innerHTML=`<div class="phone"><div class="big">Hi ${esc(me.name||'Player')}!</div><p class="note">${message}</p>${S&&S.playerCount>=20&&!S.players[me.id]?'<p class="warn">This game is full (20 players maximum).</p>':''}${room.lastError?`<details><summary>Connection details</summary><code>${esc(room.lastError)}</code></details>`:''}<button class="pri" id="retry">Retry connection</button><button id="switch-player">Switch player / join as new</button></div>`;return
     }
     const p=S.players[me.id];
     if(!p&&S.playerCount>=S.maxPlayers){app.innerHTML=`<div class="phone"><div class="big">Game is full</div><p class="note">This game supports up to ${S.maxPlayers} players.</p></div>`;return}
-    const sc=p?p.s:0; let h=`<div class="phone"><div class="note">${esc(p?.n||me.name||'Player')}${me.mode==='team'?' · '+esc(me.team):' · Solo'}</div><div class="big">$${sc}</div>`;
+    const sc=p?p.s:0; let h=`<div class="phone"><div class="note">${esc(p?.n||me.name||'Player')}${me.mode==='team'?' · '+esc(me.team):' · Solo'}</div><div class="big">$${sc}</div><button id="switch-player">Switch player / join as new</button>`;
     const wagerBox=(max,label)=>`<div>${label}</div><input id="wg" type="number" inputmode="numeric" min="0" max="${max}" placeholder="0–${max}" style="font-size:26px;text-align:center;width:180px"><button class="pri" id="wb">Lock in wager</button>`;
     if(S.phase==='clue'){
       const mine=S.buzzer===me.id, locked=S.locked.includes(me.id);
@@ -351,7 +374,22 @@ if(isPlayer){
     join();draw();
   });
   if(hasName())setInterval(()=>{if(room&&room.connected)join()},30000);
-  app.addEventListener('click',e=>{if(e.target.closest('#retry')){S=null;room.retry();draw()}});
+  app.addEventListener('click',e=>{
+    if(e.target.closest('#retry')){S=null;room.retry();draw();return}
+    if(e.target.closest('#switch-player')||e.target.closest('#choose-player')){choosingProfile=true;draw();return}
+    if(e.target.closest('#cancel-player-switch')){choosingProfile=false;draw();return}
+    if(e.target.closest('#new-player')){
+      me={id:newPlayerId(),name:'',mode:'solo',team:''};nameStrokes=[];answerStrokes=[];S=null;choosingProfile=false;
+      ls.set('jp_id',me.id);ls.set('jp_name','');ls.set('jp_mode','solo');ls.set('jp_team','');ls.set('jp_name_ink','[]');
+      draw();return
+    }
+    const selected=e.target.closest('[data-player-profile]');
+    if(selected){
+      const profile=profiles.find(p=>p.id===selected.dataset.playerProfile);if(!profile)return;
+      me={id:profile.id,name:String(profile.name||''),mode:profile.mode==='team'?'team':'solo',team:String(profile.team||'')};
+      nameStrokes=Array.isArray(profile.nameStrokes)?profile.nameStrokes:[];answerStrokes=[];S=null;choosingProfile=false;saveProfile();join();draw();
+    }
+  });
 }
 
 /* ================= HOST ================= */

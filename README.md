@@ -4,7 +4,7 @@ Browser-based Jeopardy game for a shared screen and phones/tablets. Up to 20 pla
 
 ## Join page
 
-The host can open the dedicated join page from the editor, or share a room-specific link. The generic join page is the game URL with `?join` appended; it asks for the six-character room code. A room-specific link has `?join=CODE`. Neither join view displays the question editor.
+The host can open the dedicated join page from the editor, or share a room-specific link. The generic join page is the game URL with `?join` appended; it asks for the six-character room code. A room-specific link has `?join=CODE`. Neither join view displays the question editor. The same browser automatically reuses its saved player identity when rejoining; use **Switch player / join as new** to choose another saved profile or create a new player on that device.
 
 ## Internet play
 
