@@ -66,6 +66,10 @@ main{padding:16px;max-width:1300px;margin:0 auto}
 .mobile-board .bc.used{visibility:visible;opacity:.35}
 .mobile-board .bc.on{background:var(--gold);color:#111}
 .name-pad{display:block;width:100%;height:130px;border:2px solid var(--line);border-radius:8px;background:#fff;touch-action:none}
+.profile-choice{display:flex!important;align-items:center;gap:10px;text-align:left}
+.profile-choice svg{width:72px;height:36px;flex:0 0 72px;background:#fff;border:1px solid var(--line);border-radius:6px}
+.profile-choice svg polyline{fill:none;stroke:#14172b;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
+.profile-choice-label{min-width:0}
 .name-roster{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 14px}
 .name-roster .pl{min-width:120px;max-width:220px}
 .name-roster svg{display:block;width:100%;height:34px;margin:2px auto}
@@ -294,8 +298,13 @@ if(isPlayer){
     ls.set('jp_profiles',JSON.stringify(profiles));ls.set('jp_id',me.id);
     ls.set('jp_name',me.name);ls.set('jp_mode',me.mode);ls.set('jp_team',me.team);ls.set('jp_name_ink',JSON.stringify(nameStrokes));
   };
+  const profileSignature=strokes=>(Array.isArray(strokes)?strokes:[]).map(line=>line.length>1?`<polyline points="${line.map(pt=>`${(Number(pt[0])||0)*100},${(Number(pt[1])||0)*100}`).join(' ')}"/>`:'').join('');
   const profilePicker=()=>`<div class="phone"><h1>GhostHaus Christmas Jeopardy</h1><div class="card">
-    <h2>Choose a player</h2>${profiles.map(p=>`<button data-player-profile="${esc(p.id)}" style="width:100%;margin:4px 0">${esc(p.name||'Handwritten player')}${p.mode==='team'?' · '+esc(p.team||'Team'):''}</button>`).join('')}
+    <h2>Choose a player</h2>${profiles.map(p=>{
+      const strokes=Array.isArray(p.nameStrokes)?p.nameStrokes:[];
+      const label=String(p.name||'');
+      return `<button class="profile-choice" data-player-profile="${esc(p.id)}" style="width:100%;margin:4px 0" aria-label="${esc(label||'Handwritten player profile')}">${strokes.some(st=>st.length>1)?`<svg viewBox="0 0 100 100" role="img" aria-label="Handwritten name">${profileSignature(strokes)}</svg>`:''}<span class="profile-choice-label">${label?esc(label):''}${p.mode==='team'?' · '+esc(p.team||'Team'):''}</span></button>`;
+    }).join('')}
     <button class="pri" id="new-player" style="width:100%;margin-top:8px">Join as a new player</button>
     <button id="cancel-player-switch" style="width:100%;margin-top:8px">Cancel</button>
     <p class="note">Saved players on this device keep their existing game identity and score.</p>
